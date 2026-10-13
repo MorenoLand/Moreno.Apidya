@@ -34,6 +34,8 @@ No path is hard-coded anywhere.
 | Arrow keys | Move |
 | Space / Ctrl | Fire |
 | Esc | Back to the level menu |
+| F2 | Switch between the original 4:3 picture and stretched widescreen (remembered) |
+| F11 | Fullscreen |
 
 ## Status
 

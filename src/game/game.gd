@@ -66,6 +66,9 @@ var _dead_t := 0
 var _finished := false
 var _rng := RandomNumberGenerator.new()
 var _audio: AudioManager
+var _arc: AspectRatioContainer
+var _widescreen := false
+var _toast: Label
 
 
 func setup(disks: DiskSet, level_no: int) -> void:
@@ -87,6 +90,7 @@ func _ready() -> void:
 	arc.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	arc.ratio = 4.0 / 3.0
 	add_child(arc)
+	_arc = arc
 
 	_vp = SubViewport.new()
 	_vp.size = Vector2i(VIEW_W, VIEW_H)
@@ -103,6 +107,10 @@ func _ready() -> void:
 
 	_world = Node2D.new()
 	_vp.add_child(_world)
+	var vp_back := ColorRect.new()
+	vp_back.color = Color.BLACK
+	vp_back.size = Vector2(VIEW_W, VIEW_H)
+	_world.add_child(vp_back)
 
 	var shader := load("res://shaders/amiga_indexed.gdshader") as Shader
 	_mat = ShaderMaterial.new()
@@ -149,6 +157,14 @@ func _ready() -> void:
 	_vp.add_child(_msg)
 	_update_hud()
 
+	_toast = Label.new()
+	_toast.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	_toast.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_toast.visible = false
+	add_child(_toast)
+	resized.connect(_apply_aspect)
+	_set_widescreen(bool(Settings.get_value("widescreen", false)), false)
+
 	_audio = AudioManager.new()
 	add_child(_audio)
 	if _audio.start(_disks, _level_no):
@@ -161,8 +177,42 @@ func _exit_tree() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		exited.emit()
+	if not (event is InputEventKey) or not event.pressed or event.echo:
+		return
+	match event.keycode:
+		KEY_ESCAPE:
+			exited.emit()
+		KEY_F2:
+			_set_widescreen(not _widescreen, true)
+			_show_toast("WIDESCREEN (stretched)" if _widescreen else "ORIGINAL 4:3")
+		KEY_F11:
+			var full := DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED if full else DisplayServer.WINDOW_MODE_FULLSCREEN)
+
+
+## F2: false = original 4:3 picture with bars, true = stretched to fill the whole window.
+func _set_widescreen(on: bool, save: bool) -> void:
+	_widescreen = on
+	if save:
+		Settings.set_value("widescreen", on)
+	_apply_aspect()
+
+
+func _apply_aspect() -> void:
+	if _arc == null:
+		return
+	if _widescreen and size.y > 0.0:
+		_arc.ratio = size.x / size.y
+	else:
+		_arc.ratio = 4.0 / 3.0
+
+
+func _show_toast(text: String) -> void:
+	_toast.text = text
+	_toast.visible = true
+	get_tree().create_timer(1.5).timeout.connect(func() -> void:
+		if is_instance_valid(_toast):
+			_toast.visible = false)
 
 
 func _tex(img: Image) -> ImageTexture:
