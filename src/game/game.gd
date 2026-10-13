@@ -5,6 +5,7 @@ extends Control
 ## the playfield). Screen x = raw x - X_OFFSET, screen y = raw y + FIELD_Y.
 
 signal exited
+signal level_complete(carry: Dictionary)    # the ship has left the screen; `carry` goes to the next level
 
 const VIEW_W := 320
 const BG_CHUNK := 4096
@@ -41,7 +42,7 @@ var _mat_flash: ShaderMaterial
 var _bg_chunks: Array[Sprite2D] = []    # the map picture in pieces (a texture can't be 18000 px wide)
 var _player_spr: Sprite2D
 var _hud: Hud
-var _msg: Label
+var _msg: OsdText
 var _tex_cache := {}
 
 var scroll := 0.0
@@ -81,6 +82,10 @@ var _fire_t := 0
 var _fire_was_down := false
 var _dead_t := 0
 var _finished := false
+var _complete := false          # finished by completing the level (not by game over)
+var _end_t := 0
+var _exit_v := 0.0
+var _end_sent := false
 var rng := RandomNumberGenerator.new()
 var _audio: AudioManager
 var _arc: AspectRatioContainer
@@ -99,6 +104,14 @@ func setup(disks: DiskSet, level_no: int, options: Dictionary = {}) -> void:
 	_lives = int(options.get("lives", 3))
 	_next_extra = int(options.get("one_up", 20000))
 	_extra_step = _next_extra if bool(options.get("one_up_repeat", true)) else 0
+	var carry: Dictionary = options.get("carry", {})
+	if not carry.is_empty():
+		_score = int(carry["score"])
+		_lives = int(carry["lives"])
+		_next_extra = int(carry["next_extra"])
+		var st: Dictionary = carry["ps"]
+		for k in st:
+			_ps.set(k, st[k])
 
 
 func get_score() -> int:
@@ -178,6 +191,7 @@ func _ready() -> void:
 
 	_hud = Hud.new()
 	_hud.setup(_disks.get_data(1), _disks.get_data(int(LevelDefs.LEVELS[_level_no]["file"])))
+	OsdText.set_font(_disks.get_data(1))
 	var hud_rect := TextureRect.new()
 	hud_rect.texture = _hud.texture
 	hud_rect.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -185,9 +199,8 @@ func _ready() -> void:
 	hud_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	hud_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_arc.add_child(hud_rect)
-	_msg = Label.new()
-	_msg.add_theme_font_size_override("font_size", 10)
-	_msg.position = Vector2(80, 110)
+	_msg = OsdText.new()
+	_msg.position = Vector2(0, 104)
 	_vp.add_child(_msg)
 	_update_hud()
 
@@ -270,18 +283,17 @@ func _update_hud() -> void:
 # ------------------------------------------------------------------------------------------------
 func _physics_process(_delta: float) -> void:
 	if _finished:
+		_update_end()
 		return
 	tick += 1
 	if _ready_t > 0:
 		_ready_t -= 1
 		if _ready_label == null:
-			_ready_label = Label.new()
-			_ready_label.add_theme_font_size_override("font_size", 10)
-			_ready_label.position = Vector2(104, 100)
+			_ready_label = OsdText.new()
+			_ready_label.position = Vector2(0, 86)
 			_vp.add_child(_ready_label)
 			_ready_label.text = "PLAYER ONE
-
-   READY"
+READY"
 		_ready_label.visible = _ready_t > 0
 		_update_player()
 		return
@@ -336,8 +348,8 @@ func _physics_process(_delta: float) -> void:
 
 # ---- level sections: the guardians raise "phase events" ($7B50) -------------------------------------
 var _phase_t := 0
-var _phase_label: Label
-var _ready_label: Label
+var _phase_label: OsdText
+var _ready_label: OsdText
 var _ready_t := 75              # "PLAYER ONE READY" before the level starts and after a lost ship
 
 
@@ -366,9 +378,8 @@ func _check_phase() -> void:
 			b["spr"].queue_free()
 		_bullets.clear()
 		if _phase_label == null:
-			_phase_label = Label.new()
-			_phase_label.add_theme_font_size_override("font_size", 10)
-			_phase_label.position = Vector2(100, 100)
+			_phase_label = OsdText.new()
+			_phase_label.position = Vector2(0, 90)
 			_vp.add_child(_phase_label)
 		_phase_label.text = _section_text()
 		_phase_label.visible = true
@@ -526,8 +537,53 @@ func play_song(song: int) -> void:
 		_audio.song(song)
 
 
+## What the next level starts with: score, ships and the power-ups ($980 block of the original).
+func carry_state() -> Dictionary:
+	var st := {}
+	for k in ["speed", "weapon", "w1", "w2", "w3", "pods", "bomb", "bar"]:
+		st[k] = _ps.get(k)
+	return {"score": _score, "lives": _lives, "next_extra": _next_extra, "ps": st}
+
+
+## After the level is over: the ship flies off to the right, then the next level (or the front end) follows.
+func _update_end() -> void:
+	if _end_sent:
+		return
+	_end_t += 1
+	if not _complete:
+		if _end_t > 220:
+			_end_sent = true
+			exited.emit()
+		return
+	if _end_t == 1:
+		for e in _enemies:
+			e.dead = true
+			e.killed = false
+		_reap_dead()
+		for b in _bullets:
+			b["spr"].queue_free()
+		_bullets.clear()
+		_weapons.clear_shots()
+		_msg.visible = false
+	_exit_v += 0.2
+	px += int(_exit_v)
+	_anim_t += 1
+	if _anim_t >= 2:
+		_anim_t = 0
+		_anim = (_anim + 1) & 3
+	var frames: Array = _level.player_frames[0]
+	var fr: Dictionary = frames[_anim % frames.size()]
+	_player_spr.texture = _tex(fr["img"])
+	_player_spr.position = Vector2(px - X_OFFSET, py + FIELD_Y + fr["yoff"])
+	_player_spr.visible = true
+	if px > VIEW_W + 40 or _end_t > 400:
+		_end_sent = true
+		level_complete.emit(carry_state())
+
+
 func _finish(text: String) -> void:
 	_finished = true
+	_complete = text == "LEVEL COMPLETE"
 	if _audio != null and text == "LEVEL COMPLETE":
 		_audio.song(SONG_LEVEL_END)
 	elif _audio != null:

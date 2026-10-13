@@ -8,6 +8,7 @@ var _dialog: FileDialog
 var _front: FrontEnd
 var _game: Game
 var _options := {}
+var _level_no := 1
 
 
 func _ready() -> void:
@@ -83,10 +84,28 @@ func _on_start_game(options: Dictionary) -> void:
 	if _front:
 		_front.queue_free()
 		_front = null
+	_begin_level(int(options["level"]))
+
+
+func _begin_level(level: int) -> void:
+	_level_no = level
 	_game = Game.new()
-	_game.setup(_disks, options["level"], options)
+	_game.setup(_disks, level, _options)
 	_game.exited.connect(_on_game_exited)
+	_game.level_complete.connect(_on_level_complete)
 	add_child(_game)
+
+
+## A level was cleared: the score, ships and power-ups go on to the next one; after the last the game is won.
+func _on_level_complete(carry: Dictionary) -> void:
+	if _game:
+		_game.queue_free()
+		_game = null
+	if _level_no >= 5:
+		_open_front_end({"score": int(carry["score"]), "difficulty": _options.get("difficulty", 2)})
+		return
+	_options["carry"] = carry
+	_begin_level(_level_no + 1)
 
 
 func _on_game_exited() -> void:
