@@ -37,6 +37,7 @@ var _level: LevelData
 var _vp: SubViewport
 var _world: Node2D
 var _mat: ShaderMaterial
+var _mat_flash: ShaderMaterial
 var _bg: Sprite2D
 var _player_spr: Sprite2D
 var _hud: Label
@@ -74,16 +75,16 @@ func setup(disks: DiskSet, level_no: int) -> void:
 
 func _ready() -> void:
 	_rng.seed = 1992
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_level = LevelData.load_level(_disks, _level_no)
 
 	var back := ColorRect.new()
 	back.color = Color.BLACK
-	back.set_anchors_preset(Control.PRESET_FULL_RECT)
+	back.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(back)
 
 	var arc := AspectRatioContainer.new()
-	arc.set_anchors_preset(Control.PRESET_FULL_RECT)
+	arc.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	arc.ratio = 4.0 / 3.0
 	add_child(arc)
 
@@ -108,6 +109,8 @@ func _ready() -> void:
 	_mat.shader = shader
 	_mat.set_shader_parameter("palette", ImageTexture.create_from_image(_level.line_palette))
 	_mat.set_shader_parameter("line_offset", LINE_OFFSET)
+	_mat_flash = _mat.duplicate() as ShaderMaterial
+	_mat_flash.set_shader_parameter("brightness", 2.2)
 
 	_bg = Sprite2D.new()
 	_bg.centered = false
@@ -282,6 +285,7 @@ func _update_enemies() -> void:
 			e.spr.queue_free()
 			continue
 		e.update_sprite(_level, FIELD_Y, X_OFFSET, _tex)
+		e.spr.material = _mat_flash if e.flash > 0 else _mat
 		if e.want_fire(_rng):
 			_enemy_fire(e)
 		keep.append(e)

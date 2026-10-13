@@ -6,12 +6,13 @@ var _status: Label
 var _buttons: VBoxContainer
 var _dialog: FileDialog
 var _game: Control
+var _menu: Control
 
 
 func _ready() -> void:
 	var bg := ColorRect.new()
 	bg.color = Color(0.05, 0.05, 0.08)
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
 
 	var box := VBoxContainer.new()
@@ -20,6 +21,7 @@ func _ready() -> void:
 	box.grow_vertical = Control.GROW_DIRECTION_BOTH
 	box.add_theme_constant_override("separation", 12)
 	add_child(box)
+	_menu = box
 
 	var title := Label.new()
 	title.text = "APIDYA"
@@ -92,7 +94,9 @@ func _start_level(lv: int) -> void:
 	var g := Game.new()
 	g.setup(_disks, lv)
 	g.exited.connect(_on_game_exited)
+	g.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_game = g
+	_menu.visible = false
 	add_child(g)
 
 
@@ -100,4 +104,5 @@ func _on_game_exited() -> void:
 	if _game:
 		_game.queue_free()
 		_game = null
+	_menu.visible = true
 	_show_levels()

@@ -200,5 +200,3 @@ func update_sprite(level: LevelData, field_y: int, x_off: int, tex_fn: Callable)
 	spr.visible = true
 	spr.texture = tex_fn.call(f["img"])
 	spr.position = Vector2(x + f["xoff"] - x_off, y + f["yoff"] + field_y)
-	var m := 1.0 + float(flash) * 0.35
-	spr.modulate = Color(m, m, m, 1.0)
