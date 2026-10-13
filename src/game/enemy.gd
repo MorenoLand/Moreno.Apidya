@@ -48,6 +48,7 @@ var flash_bit := false       # bit 7 of the hit point byte
 var _death_ptr := 0
 var _death_t := 1
 
+static var hp_difficulty := 2   # the level's difficulty: the original scales the wave table's hit points once ($A04E)
 static var phase_a := 0      # shared animation phases (the original's $7CAC / $7CAD)
 static var phase_b := 0
 
@@ -78,6 +79,15 @@ func _init_record(const10: int) -> void:
 	set_rw(0x10, const10)
 
 
+## Easy and practice: hp/2 + hp/4 (at least 1); hard: hp * 1.5, at most $7F; normal: unchanged.
+static func _scaled_hp(v: int) -> int:
+	if hp_difficulty < 2:
+		return maxi((v >> 1) + (v >> 2), 1)
+	if hp_difficulty > 2:
+		return mini(v + (v >> 1), 0x7F)
+	return v
+
+
 func init_from_wave(w: Dictionary, lv: LevelData, scroll: float, group_slot: int = -1) -> void:
 	level = lv
 	type = w["type"]
@@ -85,7 +95,7 @@ func init_from_wave(w: Dictionary, lv: LevelData, scroll: float, group_slot: int
 	group = group_slot
 	x = float(w["x"])
 	y = float(w["y"])
-	hp = maxi(1, w["hp"])
+	hp = _scaled_hp(maxi(1, w["hp"]))
 	frame = w["frame"]
 	score = _bcd(w["score_bcd"])
 	world_x = x - 14.0 + scroll

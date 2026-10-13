@@ -10,13 +10,16 @@ func _initialize() -> void:
 		return
 	var level := 1
 	var ticks := 3000
+	var diff := 2
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--level="):
 			level = int(a.substr(8))
 		elif a.begins_with("--ticks="):
 			ticks = int(a.substr(8))
+		elif a.begins_with("--diff="):
+			diff = int(a.substr(7))
 	var g := Game.new()
-	g.setup(found["disks"], level)
+	g.setup(found["disks"], level, {"difficulty": diff})
 	root.add_child(g)
 	await process_frame
 	await process_frame

@@ -102,6 +102,7 @@ func setup(disks: DiskSet, level_no: int, options: Dictionary = {}) -> void:
 	_disks = disks
 	_level_no = level_no
 	_options = options
+	Enemy.hp_difficulty = int(options.get("difficulty", 2))
 	_lives = int(options.get("lives", 3))
 	_next_extra = int(options.get("one_up", 20000))
 	_extra_step = _next_extra if bool(options.get("one_up_repeat", true)) else 0
@@ -293,8 +294,7 @@ func _physics_process(_delta: float) -> void:
 			_ready_label = OsdText.new()
 			_ready_label.position = Vector2(0, 86)
 			_vp.add_child(_ready_label)
-			_ready_label.text = "PLAYER ONE
-READY"
+			_ready_label.text = "   PLAYER ONE   \n     READY      "
 		_ready_label.visible = _ready_t > 0
 		_update_player()
 		return
@@ -391,7 +391,13 @@ func _check_phase() -> void:
 		if _phase_label != null:
 			_phase_label.text = _section_text()
 		if _phase_t == 0:
-			_end_phase()
+			if difficulty() == 0:
+				# practice: the level is over at the first guardian ($9134 goes to the level end routine)
+				phase_event = 0
+				_phase_label.visible = false
+				_finish("LEVEL COMPLETE")
+			else:
+				_end_phase()
 
 
 func col_counter() -> int:
@@ -405,9 +411,7 @@ func col_set_by_handler(value: int) -> void:
 
 ## The text of the original's section routine ($8C4A): STAGE n-m CLEAR and the score.
 func _section_text() -> String:
-	return "STAGE %d-%d CLEAR
-
-SCORE %06d" % [_level_no, clampi(phase_event, 1, 9), _score % 1000000]
+	return ("STAGE %d-%d CLEAR \n  SCORE %06d  ") % [_level_no, clampi(phase_event, 1, 9), _score % 1000000]
 
 
 func _end_phase() -> void:
@@ -591,7 +595,8 @@ func _finish(text: String) -> void:
 		_audio.song(SONG_LEVEL_END)
 	elif _audio != null:
 		_audio.fade(0x30000)
-	_msg.text = text + "\n\nPress ESC"
+	# the original's two lines for a lost game; the port's own message otherwise
+	_msg.text = "   GAME OVER    \n  PLAYER ONE!   " if text == "GAME OVER" else text
 
 
 # ---- enemies and formations --------------------------------------------------------------------
