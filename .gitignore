@@ -1,0 +1,27 @@
+# Godot / Redot
+.godot/
+*.import
+.mono/
+data_*/
+
+# The original game files are copyrighted: bring your own copy (see README)
+/assets/original/**
+!/assets/original/.gdignore
+!/assets/original/README.txt
+/assets/cache/
+
+# Builds and exports
+/export/
+/builds/
+*.exe
+*.pck
+*.zip
+
+# Local notes and editor/OS noise
+/docs/local/
+*.TMP
+~*
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
