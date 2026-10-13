@@ -87,6 +87,8 @@ var _complete := false          # finished by completing the level (not by game 
 var _end_t := 0
 var _exit_v := 0.0
 var _end_sent := false
+var _paused := false            # the P key ($9FB = $19): everything stops, music fades out
+var _typed := ""                # letters typed while paused: ULRDABBA gives the full power-up set
 var rng := RandomNumberGenerator.new()
 var _audio: AudioManager
 var _arc: AspectRatioContainer
@@ -228,7 +230,27 @@ func _exit_tree() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.pressed or event.echo:
 		return
+	if _paused and event.keycode >= KEY_A and event.keycode <= KEY_Z:
+		_typed = (_typed + char(event.keycode)).right(8)
+		if _typed == "ULRDABBA":
+			_ps.weapon = 3
+			_ps.speed = 4
+			_ps.pods = -1
+			_ps.bomb = -1
+			_ps.w3 = 3
+			_typed = ""
 	match event.keycode:
+		KEY_P:
+			if not _finished:
+				_set_paused(not _paused)
+		KEY_M:
+			if _audio != null:
+				_audio.set_music(not _audio.music_on)
+		KEY_S:
+			if _audio != null:
+				_audio.enabled = not _audio.enabled
+				if _audio.enabled:
+					_audio.sfx(0x10)
 		KEY_ESCAPE:
 			exited.emit()
 		KEY_F2:
@@ -283,9 +305,22 @@ func _update_hud() -> void:
 
 
 # ------------------------------------------------------------------------------------------------
+func _set_paused(on: bool) -> void:
+	if on == _paused:
+		return
+	_paused = on
+	_typed = ""
+	if _audio != null:
+		_audio.fade(0x20000 if on else 0x20040)       # volume 0 / 64, speed 2
+
+
 func _physics_process(_delta: float) -> void:
 	if _finished:
 		_update_end()
+		return
+	if _paused:
+		if Input.is_action_just_pressed("fire"):
+			_set_paused(false)
 		return
 	tick += 1
 	if _ready_t > 0:

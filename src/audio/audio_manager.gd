@@ -7,7 +7,9 @@ extends Node
 
 const QUEUE_TICKS := 4          # ~80 ms of audio rendered ahead
 
-var enabled := true
+var enabled := true             # sound effects
+var music_on := true
+var _song := 0
 var _player: TfmxPlayer
 var _thread: Thread
 var _mutex := Mutex.new()
@@ -65,7 +67,17 @@ func _exit_tree() -> void:
 
 # ---- commands (applied by the worker between replay ticks) -------------------------------------
 func song(n: int) -> void:
-	_post(["song", n])
+	_song = n
+	if music_on:
+		_post(["song", n])
+
+
+## The original's M key: the music stops, or the current song starts again.
+func set_music(on: bool) -> void:
+	if on == music_on:
+		return
+	music_on = on
+	_post(["song", _song if on else -1])
 
 
 func sfx(n: int) -> void:

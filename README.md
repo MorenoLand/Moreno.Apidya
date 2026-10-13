@@ -34,6 +34,8 @@ No path is hard-coded anywhere.
 | Arrow keys | Move / change options |
 | Space / Enter / Ctrl | Fire (hold = repeat; hold ~1 s and release = charge blast) / confirm |
 | X / Shift | Use the highlighted power-up (not needed in "auto" mode) |
+| P | Pause (the music fades out; fire or P goes on) |
+| M / S | Music off / on, sound effects off / on |
 | Esc | Back (game -> front end, front end -> title, title -> quit) |
 | F2 | Switch between the original 4:3 picture and stretched widescreen (remembered) |
 | F11 | Fullscreen |
