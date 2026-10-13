@@ -8,7 +8,7 @@ signal exited
 
 const VIEW_W := 320
 const BG_CHUNK := 4096
-const VIEW_H := 256
+const VIEW_H := 259             # video lines 40..298: the HUD strips included
 const FIELD_Y := 8              # viewport row of the first playfield line (HUD strip above)
 const FIELD_H := 240
 const LINE_OFFSET := 40         # Amiga video line shown on viewport row 0
@@ -19,7 +19,6 @@ const PLAYER_X_MAX := 300
 const PLAYER_Y_MIN := 3
 const PLAYER_Y_MAX := 212
 const FIRE_REPEAT := 6          # ticks between volleys while the button is held
-const METER := ["SPD", "BMB", "SHT", "MSL", "WAV", "OPT", "SHD", "SLW"]
 
 # sound effect numbers used by the original (from the call sites of its sound routine)
 const SFX_ENEMY_FIRE := 7
@@ -41,8 +40,7 @@ var _mat: ShaderMaterial
 var _mat_flash: ShaderMaterial
 var _bg_chunks: Array[Sprite2D] = []    # the map picture in pieces (a texture can't be 18000 px wide)
 var _player_spr: Sprite2D
-var _hud: Label
-var _meter_label: Label
+var _hud: Hud
 var _msg: Label
 var _tex_cache := {}
 
@@ -73,7 +71,9 @@ var py := 100
 var _vdir := 0
 var _anim := 0
 var _anim_t := 0
-var _lives := 3
+var _lives := 3                 # ships in reserve ($7C54): the ship in play is not counted
+var _next_extra := 20000        # score of the next extra ship, 0 = none
+var _extra_step := 20000        # distance to the one after it, 0 = only once
 var _options := {}
 var _score := 0
 var _invuln := 0
@@ -97,6 +97,8 @@ func setup(disks: DiskSet, level_no: int, options: Dictionary = {}) -> void:
 	_level_no = level_no
 	_options = options
 	_lives = int(options.get("lives", 3))
+	_next_extra = int(options.get("one_up", 20000))
+	_extra_step = _next_extra if bool(options.get("one_up_repeat", true)) else 0
 
 
 func get_score() -> int:
@@ -174,14 +176,15 @@ func _ready() -> void:
 	_weapons.enemy_hit.connect(_on_enemy_hit)
 	_weapons.explosion.connect(explode)
 
-	_hud = Label.new()
-	_hud.add_theme_font_size_override("font_size", 8)
-	_hud.position = Vector2(2, -2)
-	_vp.add_child(_hud)
-	_meter_label = Label.new()
-	_meter_label.add_theme_font_size_override("font_size", 8)
-	_meter_label.position = Vector2(150, -2)
-	_vp.add_child(_meter_label)
+	_hud = Hud.new()
+	_hud.setup(_disks.get_data(1), _disks.get_data(int(LevelDefs.LEVELS[_level_no]["file"])))
+	var hud_rect := TextureRect.new()
+	hud_rect.texture = _hud.texture
+	hud_rect.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	hud_rect.stretch_mode = TextureRect.STRETCH_SCALE
+	hud_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	hud_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_arc.add_child(hud_rect)
 	_msg = Label.new()
 	_msg.add_theme_font_size_override("font_size", 10)
 	_msg.position = Vector2(80, 110)
@@ -254,11 +257,14 @@ func _tex(img: Image) -> ImageTexture:
 
 
 func _update_hud() -> void:
-	_hud.text = "L%d  %06d  x%d" % [_level_no, _score, _lives]
-	var t := ""
-	for i in METER.size():
-		t += ("[%s]" if _ps.bar == i + 1 else " %s ") % METER[i]
-	_meter_label.text = t
+	while _next_extra > 0 and _score >= _next_extra:
+		_lives += 1
+		_next_extra = _next_extra + _extra_step if _extra_step > 0 else 0
+	if _hud.ok:
+		_hud.set_score(_score)
+		_hud.set_lives(_lives)
+		_hud.set_slot(_ps.bar)
+		_hud.tick(tick)
 
 
 # ------------------------------------------------------------------------------------------------
@@ -348,11 +354,12 @@ func _check_phase() -> void:
 			if e.vm_slot >= 0:
 				# the original's section routine clears the hit point byte of every record and starts the
 				# level state afresh: handlers that restore their byte each tick (levels 4, 5) are gone too
-				_score += e.score
 				e.hp = 0
 				e.flash_bit = false
-				e.dead = true
-				e.killed = true
+				if _level_no == 5:
+					_score += e.score
+					e.dead = true
+					e.killed = true
 			else:
 				e.hit(1000)
 		for b in _bullets:
@@ -806,7 +813,7 @@ func _update_player() -> void:
 		_dead_t -= 1
 		_player_spr.visible = (_dead_t / 4) % 2 == 0 and _dead_t < 40
 		if _dead_t == 0:
-			if _lives <= 0:
+			if _lives < 0:
 				_finish("GAME OVER")
 				return
 			_invuln = 100

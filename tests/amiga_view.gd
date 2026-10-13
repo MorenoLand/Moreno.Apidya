@@ -8,6 +8,7 @@ const BASE := 0xA00
 var cpu: M68K
 var chip: Chipset
 var hooks := {}
+var dump_copper := false
 
 
 func _hk_rts(c: M68K) -> void:
@@ -26,6 +27,8 @@ func _initialize() -> void:
 			frames = int(a.substr(9))
 		elif a.begins_with("--out="):
 			out = a.substr(6)
+		elif a == "--copper":
+			dump_copper = true
 		elif a.begins_with("--every="):
 			every = int(a.substr(8))
 	var found := DiskLocator.find()
@@ -39,6 +42,10 @@ func _initialize() -> void:
 	var front := disks.get_data(0)
 	for i in mini(front.size(), 0x3F5F0):
 		mem[0x40A10 + i] = front[i]
+	# file 1 (HUD panels, font strip) stays in chip RAM at $4B200
+	var hudfile := disks.get_data(1)
+	for i in hudfile.size():
+		mem[0x4B200 + i] = hudfile[i]
 	var label := -1
 	for i in range(0, 0x600, 2):
 		if raw[i] == 0x20 and raw[i + 1] == 0x39 and raw[i + 2] == 0 and raw[i + 3] == 0xDF and raw[i + 4] == 0xF0 \
@@ -77,6 +84,16 @@ func _initialize() -> void:
 
 func _save(disp: AmigaDisplay, name: String) -> void:
 	var cop := ((int(chip.regs.get(0x80, 0)) & 0xFFFF) << 16) | (int(chip.regs.get(0x82, 0)) & 0xFFFE)
+	if dump_copper:
+		var ca := cop
+		for i in 700:
+			var w0 := (cpu.mem[ca] << 8) | cpu.mem[ca + 1]
+			var w1 := (cpu.mem[ca + 2] << 8) | cpu.mem[ca + 3]
+			print("cop %05X: %04X %04X%s" % [ca, w0, w1, "" if (w0 & 1) else "  reg %03X" % (w0 & 0x1FE)])
+			ca += 4
+			if w0 == 0xFFFF and w1 == 0xFFFE:
+				break
+		print("regs: ", chip.regs)
 	var img := disp.render(cop, chip.regs)
 	img.save_png("G:/Development/Working/Amiga/analysis/renders/%s.png" % name)
 	var top := img.get_region(Rect2i(0, 36, 640, 20))

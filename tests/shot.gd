@@ -16,6 +16,9 @@ func _initialize() -> void:
 	var bomb := 0
 	var pulse := 0
 	var start_col := -1
+	var bar := 0
+	var score_arg := 0
+	var lives_arg := -1
 	var ps_arg: PackedStringArray = []
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--level="):
@@ -30,6 +33,12 @@ func _initialize() -> void:
 			god = true
 		elif a.begins_with("--col="):
 			start_col = int(a.substr(6))
+		elif a.begins_with("--bar="):
+			bar = int(a.substr(6))
+		elif a.begins_with("--score="):
+			score_arg = int(a.substr(8))
+		elif a.begins_with("--lives="):
+			lives_arg = int(a.substr(8))
 		elif a.begins_with("--bomb="):
 			bomb = int(a.substr(7))
 		elif a.begins_with("--pulse="):
@@ -50,6 +59,11 @@ func _initialize() -> void:
 		g._ps.pods = int(ps_arg[4])
 		g._ps.speed = int(ps_arg[5])
 	g._ps.bomb = bomb
+	g._ps.bar = bar
+	if score_arg > 0:
+		g._score = score_arg
+	if lives_arg >= 0:
+		g._lives = lives_arg
 	if start_col >= 0:
 		g.jump_to_col(start_col)
 	Input.action_press("fire")
