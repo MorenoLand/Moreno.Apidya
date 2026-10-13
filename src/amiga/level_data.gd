@@ -413,6 +413,23 @@ func opaque_image(gfx: int, w_words: int, rows: int) -> Image:
 	return image_cache[k]
 
 
+## The picture of a second tile map (a guardian's hall): `cols` x `rows` tiles of 16 pixels, tile numbers are
+## the low ten bits of the words at `map + row * stride + col * 2`, graphics at `tiles + number * 128`.
+func room_image(room: Dictionary) -> Image:
+	var cols: int = room["cols"]
+	var rows: int = room["rows"]
+	var img := Image.create(cols * 16, rows * 16, false, Image.FORMAT_LA8)
+	for r in rows:
+		for c in cols:
+			var o := _off(int(room["map"]) + r * int(room["stride"]) + c * 2)
+			if o < 0 or o + 1 >= raw.size():
+				continue
+			var tile := BE.u16(raw, o) & 0x3FF
+			var t := opaque_image(int(room["tiles"]) + tile * 128, 1, 16)
+			img.blit_rect(t, Rect2i(0, 0, 16, 16), Vector2i(c * 16, r * 16))
+	return img
+
+
 ## Shot-style sprite (rows * planes words per column, mask duplicated per plane) cached by address.
 func interleaved_image(gfx: int, mask: int, w_words: int, rows: int) -> Image:
 	var k := "i%x_%x_%d_%d" % [gfx, mask, w_words, rows]

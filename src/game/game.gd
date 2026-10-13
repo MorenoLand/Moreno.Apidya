@@ -492,6 +492,8 @@ func _music_check(force: bool = false) -> void:
 
 var _music_part := 0
 var _scene := Enemy.new()       # owner of the sprites drawn by the scene routines of the original
+var _room_spr: Sprite2D        # a guardian's hall (level 4): its own tile map instead of the level map
+var _room_active := false
 
 
 ## Hit tests used by handlers that do their own collision (see HandlerVM): damage of the player's
@@ -688,6 +690,7 @@ func _update_enemies() -> void:
 			e.spr.material = _mat_flash if e.flash > 0 else _mat
 	if _vm != null and _vm.ok:
 		_vm.run_scene(_scene)
+		_update_room()
 		_show_vm_parts(_scene)
 
 
@@ -736,6 +739,34 @@ func _show_piece8(e: Enemy) -> void:
 	e.spr.visible = true
 
 
+## Level 4's guardian hall: while the scene routine is the one that scrolls the second tile map, that map is
+## the background, at the column and phase the routine keeps in its variables.
+func _update_room() -> void:
+	var room: Dictionary = LevelDefs.LEVELS[_level_no].get("room", {})
+	if room.is_empty() or _vm == null or not _vm.ok or not _vm.syms.has("scene_a"):
+		return
+	var active := (_vm.cpu.r32(int(_vm.syms["scene_a"])) & 0xFFFFFF) == int(room["routine"])
+	if active and _room_spr == null:
+		_room_spr = Sprite2D.new()
+		_room_spr.centered = false
+		_room_spr.texture = ImageTexture.create_from_image(_level.room_image(room))
+		_room_spr.material = _mat
+		_room_spr.position = Vector2(0, FIELD_Y)
+		_world.add_child(_room_spr)
+		_world.move_child(_room_spr, _bg_chunks[_bg_chunks.size() - 1].get_index() + 1)
+	if active != _room_active:
+		_room_active = active
+		for c in _bg_chunks:
+			c.visible = not active
+		if _room_spr != null:
+			_room_spr.visible = active
+	if active:
+		var col0 := (_vm.cpu.r32(int(room["ptr"])) - int(room["map"])) >> 1
+		col0 = clampi(col0, 0, int(room["cols"]) - 21)
+		var shift := _vm.cpu.r16(int(room["shift"])) & 15
+		_room_spr.position.x = float(-col0 * 16 + shift)
+
+
 ## Sprites a handler (or scene routine) asked for this tick: its draw records and blitter copies.
 func _show_vm_parts(e: Enemy) -> void:
 	var n := 0
@@ -745,6 +776,8 @@ func _show_vm_parts(e: Enemy) -> void:
 		n += 1
 	var head := _vm.head()
 	for b in e.vm_blits:
+		if _room_active and e == _scene:
+			break                                   # the hall's tile copies are the picture itself
 		var con0: int = b["con0"]
 		var rows: int = b["h"] / _level.planes
 		var w: int = b["w"]

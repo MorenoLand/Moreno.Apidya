@@ -52,6 +52,10 @@ func _initialize() -> void:
 					line += " %04X" % g._vm.cpu.r16(dump_a + i * 2)
 				print(line)
 			print("t=%d scroll %.0f locked %s enemies %d" % [t, g.scroll, str(g.scroll_locked), g._enemies.size()])
+			if g._scene.vm_blits.size() > 0 or g._scene.vm_draws.size() > 0:
+				print("   scene: %d blits %d draws" % [g._scene.vm_blits.size(), g._scene.vm_draws.size()])
+				for b in g._scene.vm_blits:
+					print("      blit con0=%04X a=%05X b=%05X dst=%04X h=%d w=%d" % [b["con0"], b["a"], b["b"], b["dst_off"], b["h"], b["w"]])
 			for e in g._enemies:
 				if e.vm_slot >= 0:
 					print("   h=%04X type %d fl %02X x %d y %d hp %d fr %d hit %dx%d inv %s flashbit %s 19=%02X 14=%02X draws %d blits %d parts %d px %d py %d" % [e.rw(0x1C), e.type, e.flags, e.x, e.y, e.hp, e.frame, e.hit_w, e.hit_h, str(e.invulnerable), str(e.flash_bit), e.rb(0x19), e.rb(0x14), e.vm_draws.size(), e.vm_blits.size(), e.parts.size(), g.px, g.py])

@@ -52,8 +52,12 @@ Early but playable prototype.
 | Audio | all music and sound effects, rendered by the game's own replay routine (see below) |
 | Enemy handlers | the shooters, cannons, plants, throwers, mini guardians and level guardians of all levels are the original's own routines, run from the level file by the 68000 interpreter (see below) |
 | Power-ups | bombs (lobbed bomb and the two terrain crawlers) in addition to the weapons above |
-| Playable | all five levels run from the start through their guardians |
-| Not yet | the scrolling boss room picture of level 4, the ending, exact explosion graphics, HUD graphics, story animations |
+| Playable | all five levels run from the start through their guardians; clearing a level carries score, ships and power-ups on to the next, the difficulty decides where the game ends (practice: after level 4 back to the menu, easy: after level 4 with the short ending, normal / hard: level 5 and the ending) |
+| HUD | the original's two strips drawn from its own panel bitmaps: 1UP / 2UP plates with the active player's marker, score digits, spare ships (extra ship every 20000 / 40000 / once at 8000 / 5000 as chosen), the eight power-up plates with the pulsing highlight; texts in the original's font |
+| Continue | "CONTINUE YES / NO" with three credits after the last ship is lost, as in the original |
+| Ending | the original's own ending program (file 20 of the disk) is run in the interpreter: its pictures, texts and music (its software mixer is performed natively) |
+| Level 4 hall | the guardian's hall is drawn from the second tile map the level's own routine scrolls |
+| Not yet | exact explosion graphics, story animations, two player team mode, the bonus game |
 
 ## How it works
 

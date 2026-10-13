@@ -29,7 +29,12 @@ const LEVELS := {
 		"bobs": 0x75E6, "bob_count": 66, "player": 0x8970, "player_gfx": 0x10650,
 		"waves": 0x7E80, "copper": 0x8400, "angle": 0x87F4,
 		"shots": 0x8ED8, "ball_script": 0x6E08, "phase": 0x87BC,
-		"item_gfx": 0x10B48, "item_mask": 0x162AE},
+		"item_gfx": 0x10B48, "item_mask": 0x162AE,
+		# the guardian's hall: while the routine at `routine` is the main loop's scene routine it redraws the
+		# screen from a second tile map (15 rows of `stride` bytes), moved by `ptr` (first visible column) and
+		# the hardware scroll phase at `shift`
+		"room": {"routine": 0x5560, "map": 0x31808, "tiles": 0x2F888, "stride": 0x3C, "rows": 15, "cols": 50,
+			"ptr": 0x57CE, "shift": 0x7D7E}},
 	5: {"name": "Castle", "file": 17, "scroll": 2.0, "end_col": 0x44A, "tiles": 0x1A178, "planes": 4, "map": 0, "cols": 0, "pal": 0x89B8,
 		"gen_map": {"init": 0xA00, "main": 0xAB0, "step": 0xD40, "col_var": 0x7ACC, "end_col": 0x44A,
 			"ptr_var": 0x7AB8, "tiles": 0x1A178, "tile_bytes": 128, "tile_size": 0x1001, "row_bytes": 184,
