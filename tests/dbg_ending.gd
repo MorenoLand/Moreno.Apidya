@@ -1,7 +1,7 @@
 extends SceneTree
 ## Developer tool: runs a program file of the disk (default: file 20, the end of the game) from $A00 in the
 ## interpreter and saves what its Copper list displays after every slice of instructions.
-##   redot --path . --script res://tests/dbg_ending.gd -- --file=20 --d0=0 --slices=30 --slice=1000000 --out=end
+##   redot --path . --script res://tests/dbg_ending.gd -- --file=20 --d0=0 --slices=30 --slice=50   (slice = frames per picture) --out=end
 var cpu: M68K
 var chip: Chipset
 var hooks := {}
@@ -22,6 +22,7 @@ func _initialize() -> void:
 	var slices := 20
 	var slice := 1000000
 	var out := "end"
+	var spin := 0xB10
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--file="):
 			file = int(a.substr(7))
@@ -33,6 +34,8 @@ func _initialize() -> void:
 			slice = int(a.substr(8))
 		elif a.begins_with("--out="):
 			out = a.substr(6)
+		elif a.begins_with("--spin="):
+			spin = a.substr(7).hex_to_int()
 	var disks: DiskSet = DiskLocator.find()["disks"]
 	var raw := disks.get_data(file)
 	print("file %d: %d bytes" % [file, raw.size()])
@@ -59,23 +62,42 @@ func _initialize() -> void:
 	cpu.pc = 0xA00
 	var disp := AmigaDisplay.new()
 	disp.mem = cpu.mem
+	var frame_instr := 30000
+	var vec := 0
 	for s in slices:
 		var n := 0
-		while cpu.pc != M68K.SENTINEL and not cpu.failed and n < slice:
-			if hooks.has(cpu.pc):
-				hooks[cpu.pc].call(cpu)
-			elif (cpu.mem[cpu.pc] << 8 | cpu.mem[cpu.pc + 1]) == 0x4E40:
-				# TRAP #0 of the driver only moves the supervisor stack to $4C880
-				cpu.pc += 2
-				cpu.a[7] = 0x4C87A
-			else:
-				cpu.step()
-			n += 1
-		print("slice %d: pc=%X instr=%d failed=%s %s" % [s, cpu.pc, n, str(cpu.failed), cpu.last_error])
+		var t0 := Time.get_ticks_msec()
+		# `slice` frames of 50 Hz: run the main program, then enter the vertical blank interrupt
+		for f in slice:
+			var k := 0
+			while cpu.pc != M68K.SENTINEL and not cpu.failed and k < frame_instr:
+				if cpu.pc == spin and cpu.mem[0x2212 + 0] == 0:
+					break          # waiting for the next frame: nothing to compute
+				if hooks.has(cpu.pc):
+					hooks[cpu.pc].call(cpu)
+				elif (cpu.mem[cpu.pc] << 8 | cpu.mem[cpu.pc + 1]) == 0x4E40:
+					cpu.pc += 2
+					cpu.a[7] = 0x4C87A
+				else:
+					cpu.step()
+				k += 1
+			n += k
+			if cpu.pc == M68K.SENTINEL or cpu.failed:
+				break
+			vec = cpu.r32(0x74)
+			if vec != 0:
+				cpu._push32(cpu.pc)
+				cpu.a[7] = (cpu.a[7] - 2) & 0xFFFFFFFF
+				cpu.w16(cpu.a[7], cpu.get_sr())
+				cpu.pc = vec
+		print("slice %d: pc=%X instr=%d failed=%s %s  cpu %d ms" % [s, cpu.pc, n, str(cpu.failed), cpu.last_error, Time.get_ticks_msec() - t0])
+		var t1 := Time.get_ticks_msec()
 		var cop := ((int(chip.regs.get(0x80, 0)) & 0xFFFF) << 16) | (int(chip.regs.get(0x82, 0)) & 0xFFFE)
 		if cop != 0:
 			var img := disp.render(cop, chip.regs)
+			print("   render %d ms" % (Time.get_ticks_msec() - t1))
 			img.save_png("G:/Development/Working/Amiga/analysis/renders/%s_%02d.png" % [out, s])
 		if cpu.pc == M68K.SENTINEL or cpu.failed:
 			break
+	print("vectors: lvl1 %X lvl2 %X lvl3 %X lvl4 (70) %X lvl5 (74) %X lvl6 (78) %X; INTENA %X DMACON %X" % [cpu.r32(0x64), cpu.r32(0x68), cpu.r32(0x6C), cpu.r32(0x70), cpu.r32(0x74), cpu.r32(0x78), 0, 0])
 	quit(0)

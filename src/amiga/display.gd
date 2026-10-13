@@ -172,6 +172,64 @@ func render(copper: int, regs_in: Dictionary) -> Image:
 	return img
 
 
+## The chip RAM ranges a picture made from this Copper list depends on (the list itself, every bitplane
+## and sprite pointer it or the registers set, a screen's worth of lines after each). Used to find out
+## whether a frame needs to be drawn again; returns an array of Vector2i(start, end).
+func watch_ranges(copper: int, regs_in: Dictionary) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	var ptrs := {}
+	var sprites := {}
+	var stride := 0
+	var h := {0xE0: 0, 0xE4: 0, 0xE8: 0, 0xEC: 0, 0xF0: 0, 0xF4: 0}
+	for r in range(0xE0, 0xF8, 2):
+		h[r] = int(regs_in.get(r, 0))
+	for r in range(0xE0, 0xF8, 4):
+		var p := ((int(h[r]) & 0x1F) << 16) | (int(h[r + 2]) & 0xFFFE)
+		if p != 0:
+			ptrs[p] = true
+	var mod := maxi(maxi(int(regs_in.get(0x108, 0)), int(regs_in.get(0x10A, 0))), 0)
+	var cop := copper
+	var guard := 0
+	while guard < 1500:
+		guard += 1
+		var a := _w(cop)
+		var b := _w(cop + 2)
+		if a == 0xFFFF and b == 0xFFFE:
+			break
+		cop += 4
+		if a & 1:
+			continue
+		var r := a & 0x1FE
+		if r >= 0xE0 and r <= 0xF6:
+			h[r] = b
+			if r & 2:
+				var k := r & 0x1FC
+				var p2 := ((int(h[k]) & 0x1F) << 16) | (b & 0xFFFE)
+				if p2 != 0:
+					ptrs[p2] = true
+		elif r >= 0x120 and r <= 0x13E:
+			h[r] = b
+			if r & 2:
+				var k2 := r & 0x1FC
+				var sp := ((int(h.get(k2, 0)) & 0x1F) << 16) | (b & 0xFFFE)
+				if sp != 0:
+					sprites[sp] = true
+			else:
+				h[r] = b
+		elif r == 0x108 or r == 0x10A:
+			mod = maxi(mod, _s16(b))
+	var ddfstrt := int(regs_in.get(0x92, 0x38))
+	var ddfstop := int(regs_in.get(0x94, 0xD0))
+	stride = (((ddfstop - ddfstrt) >> 3) + 2) * 2 + mod
+	stride = clampi(stride, 40, 480)
+	out.append(Vector2i(copper, mini(copper + cop - copper + 8, mem.size())))
+	for p in ptrs:
+		out.append(Vector2i(p, mini(p + stride * 256, mem.size())))
+	for p in sprites:
+		out.append(Vector2i(p, mini(p + 1024, mem.size())))
+	return out
+
+
 static func _s16(v: int) -> int:
 	v &= 0xFFFF
 	return v - 65536 if v >= 32768 else v

@@ -7,6 +7,7 @@ var _prompt: Control
 var _dialog: FileDialog
 var _front: FrontEnd
 var _game: Game
+var _ending: Ending
 var _options := {}
 var _level_no := 1
 
@@ -101,11 +102,32 @@ func _on_level_complete(carry: Dictionary) -> void:
 	if _game:
 		_game.queue_free()
 		_game = null
+	var score := int(carry["score"])
+	var diff := int(_options.get("difficulty", 2))
+	# the original's driver: after level 4 the easy game ends (practice has no ending at all), the normal and
+	# hard games go on to level 5; its ending program gets 0 / 1 (hard) after level 5 and 2 after level 4
+	if _level_no == 4 and diff < 2:
+		if diff == 0:
+			_open_front_end({"score": score, "difficulty": diff})
+		else:
+			_begin_ending(2, score)
+		return
 	if _level_no >= 5:
-		_open_front_end({"score": int(carry["score"]), "difficulty": _options.get("difficulty", 2)})
+		_begin_ending(1 if diff == 3 else 0, score)
 		return
 	_options["carry"] = carry
 	_begin_level(_level_no + 1)
+
+
+func _begin_ending(mode: int, score: int) -> void:
+	_ending = Ending.new()
+	_ending.setup(_disks, mode)
+	_ending.finished.connect(func() -> void:
+		if _ending:
+			_ending.queue_free()
+			_ending = null
+		_open_front_end({"score": score, "difficulty": _options.get("difficulty", 2)}))
+	add_child(_ending)
 
 
 func _on_game_exited() -> void:
