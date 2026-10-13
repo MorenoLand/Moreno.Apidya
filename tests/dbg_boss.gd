@@ -29,12 +29,10 @@ func _initialize() -> void:
 		if chase:
 			var best: Enemy = null
 			for e in g._enemies:
-				if e.vm_slot >= 0 and (e.hp > 0 or e.vm_draws.size() > 0) and (best == null or e.vm_draws.size() > best.vm_draws.size() or e.hp > best.hp):
+				if e.vm_slot >= 0 and e.x < 330 and e.y < 230 and (e.hp > 0 or e.vm_draws.size() > 0) and (best == null or e.vm_draws.size() > best.vm_draws.size() or e.hp > best.hp):
 					best = e
 			if best != null:
-				var ty := int(best.y)
-				if best.vm_draws.size() > 0:
-					ty = int(best.vm_draws[(t / 60) % best.vm_draws.size()]["y"]) + 4
+				var ty := int(best.y) + best.hit_h / 2 - 4
 				g.py = clampi(ty - 8 + (t / 5) % 21, 3, 212)
 		g._physics_process(0.02)
 		if t % 100 == 0 or t == ticks - 1:

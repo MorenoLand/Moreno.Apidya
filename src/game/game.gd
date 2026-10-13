@@ -7,12 +7,13 @@ extends Control
 signal exited
 
 const VIEW_W := 320
+const BG_CHUNK := 4096
 const VIEW_H := 256
 const FIELD_Y := 8              # viewport row of the first playfield line (HUD strip above)
 const FIELD_H := 240
 const LINE_OFFSET := 40         # Amiga video line shown on viewport row 0
 const X_OFFSET := 14
-const SCROLL_STEP := 0.5        # px per 50 Hz tick
+const SCROLL_STEP := 0.5        # px per 50 Hz tick of the capsules (and of most levels' map)
 const PLAYER_X_MIN := 20
 const PLAYER_X_MAX := 300
 const PLAYER_Y_MIN := 3
@@ -38,7 +39,7 @@ var _vp: SubViewport
 var _world: Node2D
 var _mat: ShaderMaterial
 var _mat_flash: ShaderMaterial
-var _bg: Sprite2D
+var _bg_chunks: Array[Sprite2D] = []    # the map picture in pieces (a texture can't be 18000 px wide)
 var _player_spr: Sprite2D
 var _hud: Label
 var _meter_label: Label
@@ -46,9 +47,15 @@ var _msg: Label
 var _tex_cache := {}
 
 var scroll := 0.0
+var _scroll_per_tick := SCROLL_STEP
 var scroll_locked := false     # a guardian holds the scroll ($7BAC)
 var phase_event := 0           # $7B50: guardian defeated / level section done
-var _col := -1
+var _col := -1                  # the original's wave column counter ($7BAA, $7ACC ...)
+var _col_start := 21            # its value when the main loop starts
+var _col_started := false
+var _col_override := -1         # a handler set the counter (the guardian says where the level goes on)
+var _scroll_col := 0            # whole 16 pixel columns scrolled so far
+var col_frozen := false         # level 5: a guardian stops the counter while the picture goes on
 var _wave_idx := 0
 var _enemies: Array[Enemy] = []
 var _bullets: Array[Dictionary] = []     # enemy bullets {x,y,vx,vy,big,spr}
@@ -100,6 +107,9 @@ func _ready() -> void:
 	rng.seed = 1992
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_level = LevelData.load_level(_disks, _level_no)
+	_scroll_per_tick = float(LevelDefs.LEVELS[_level_no].get("scroll", SCROLL_STEP))
+	_col_start = int(LevelDefs.COL_START[_level_no])
+	_col = _col_start - 1
 
 	var back := ColorRect.new()
 	back.color = Color.BLACK
@@ -140,13 +150,16 @@ func _ready() -> void:
 	_mat_flash = _mat.duplicate() as ShaderMaterial
 	_mat_flash.set_shader_parameter("brightness", 2.2)
 
-	_bg = Sprite2D.new()
-	_bg.centered = false
-	_bg.region_enabled = true
-	_bg.texture = ImageTexture.create_from_image(_level.bg_image)
-	_bg.material = _mat
-	_bg.position = Vector2(0, FIELD_Y)
-	_world.add_child(_bg)
+	var bg_img: Image = _level.bg_image
+	for x0 in range(0, bg_img.get_width(), BG_CHUNK):
+		var piece := Sprite2D.new()
+		piece.centered = false
+		piece.texture = ImageTexture.create_from_image(
+				bg_img.get_region(Rect2i(x0, 0, mini(BG_CHUNK, bg_img.get_width() - x0), bg_img.get_height())))
+		piece.material = _mat
+		piece.position = Vector2(x0, FIELD_Y)
+		_world.add_child(piece)
+		_bg_chunks.append(piece)
 
 	_player_spr = Sprite2D.new()
 	_player_spr.centered = false
@@ -256,14 +269,24 @@ func _physics_process(_delta: float) -> void:
 	Enemy.phase_a = [0, 1, 2, 1][tick & 3]
 	Enemy.phase_b = [1, 2, 1, 0][tick & 3]
 	if not scroll_locked:
-		scroll += SCROLL_STEP
-	var new_col := int(scroll) / 16
+		scroll += _scroll_per_tick
+	if not _col_started:
+		# the original's first pass of the wave routine sees the counter at its starting value
+		_col_started = true
+		_col = _col_start
+		_spawn_wave(_col)
 	var maxscroll := float(_level.cols * 16 - VIEW_W)
-	if scroll >= maxscroll:
-		scroll = maxscroll
+	var end_col := int(LevelDefs.LEVELS[_level_no].get("end_col", 0))
+	if scroll >= maxscroll or (end_col > 0 and _col >= end_col):
+		scroll = minf(scroll, maxscroll)
 		_finish("LEVEL COMPLETE")
-	_bg.region_rect = Rect2(int(scroll), 0, VIEW_W, FIELD_H)
-	while new_col > _col:
+	for i in _bg_chunks.size():
+		_bg_chunks[i].position.x = i * BG_CHUNK - int(scroll)
+	var scrolled := int(scroll) / 16
+	while scrolled > _scroll_col:
+		_scroll_col += 1
+		if col_frozen:
+			continue
 		_col += 1
 		if _phase_t == 0:
 			_spawn_wave(_col)
@@ -322,18 +345,33 @@ func _check_phase() -> void:
 			_end_phase()
 
 
+func col_counter() -> int:
+	return _col
+
+
+func col_set_by_handler(value: int) -> void:
+	if value != _col and value > 0:
+		_col_override = value
+
+
 func _end_phase() -> void:
 	phase_event = 0
 	_phase_label.visible = false
 	scroll_locked = false
-	jump_to_col(mini(_col + 40, _level.cols - 21))
+	var base := _col_override if _col_override >= 0 else _col
+	_col_override = -1
+	if _vm != null:
+		_vm.section_reset()
+	jump_to_col(mini(base + 40, _level.cols - 21 + _col_start))
 	_music_check(true)
 
 
 ## Moves the level to a map column; the waves of the columns in between are skipped.
 func jump_to_col(target: int) -> void:
-	scroll = float(target * 16)
+	scroll = float((target - _col_start) * 16)
+	_scroll_col = int(scroll) / 16
 	_col = target
+	_col_started = true
 	var waves := _level.waves
 	while _wave_idx < waves.size() and (waves[_wave_idx]["col"] <= target):
 		_wave_idx += 1
@@ -404,7 +442,7 @@ func _spawn_wave(col: int) -> void:
 func _spawn_enemy(w: Dictionary, group_slot: int, use_vm: bool = true) -> Enemy:
 	var e := Enemy.new()
 	e.init_from_wave(w, _level, scroll, group_slot)
-	if use_vm and (e.type == 4 or e.type == 5):
+	if use_vm and (e.type == 4 or e.type == 5 or e.type == 8):
 		if _vm != null and _vm.ok and _vm.bind(e):
 			e.no_draw = true
 		else:
@@ -488,6 +526,10 @@ func _update_enemies() -> void:
 
 ## One tick of an enemy whose behaviour is the original handler code.
 func _run_vm_enemy(e: Enemy) -> void:
+	if e.type == 8 and e.frame < _level.type8_pieces.size():
+		# the dispatcher of level 5 hands the table's hit box to the record every tick
+		e.hit_w = _level.type8_pieces[e.frame]["hit_w"]
+		e.hit_h = _level.type8_pieces[e.frame]["hit_h"]
 	_vm.step(e)
 	if e.dead:
 		return
@@ -499,6 +541,9 @@ func _run_vm_enemy(e: Enemy) -> void:
 	if e.type == 5:
 		e.no_draw = false
 		e.update_sprite(self, FIELD_Y, X_OFFSET, _tex)
+	elif e.type == 8:
+		_show_piece8(e)
+		e.flash_bit = false             # the dispatcher of level 5 clears it after the handler ran
 	else:
 		e.spr.visible = false
 	# death: the byte at +8 ran down to zero (flash bit consumed); a death pattern keeps the handler
@@ -506,8 +551,22 @@ func _run_vm_enemy(e: Enemy) -> void:
 	if e.dying:
 		e._death_step(self)
 		return
-	if e.hp == 0 and not e.flash_bit:
+	# levels 4 and 5 look only at the hit point bits of the byte at +8 (levels 1-3 at the whole byte, whose
+	# flash bit the handler or the dispatcher clears)
+	if e.hp == 0 and (not e.flash_bit or _vm.hp_mask != 0x7F):
 		_vm_enemy_died(e)
+
+
+## Level 5 type 8 objects: the picture of the table entry named by the frame byte, at the record's position.
+func _show_piece8(e: Enemy) -> void:
+	if e.frame >= _level.type8_pieces.size() or (e.flags & 0x10) != 0:
+		e.spr.visible = false
+		return
+	var pc: Dictionary = _level.type8_pieces[e.frame]
+	e.spr.texture = _tex(pc["img"])
+	e.spr.position = Vector2(e.x - X_OFFSET + int(pc["xoff"]), e.y + FIELD_Y + int(pc["yoff"]))
+	e.spr.material = _mat_flash if e.flash_bit else _mat
+	e.spr.visible = true
 
 
 ## Sprites a handler (or scene routine) asked for this tick: its draw records and blitter copies.
@@ -590,7 +649,7 @@ func adopt_vm_enemy(vm: HandlerVM, slot: int) -> Enemy:
 	var a: int = vm.slot_addr(slot)
 	var tw := vm.cpu.r16(a)
 	var t := tw & 0x1FF
-	if t != 4 and t != 5:
+	if t != 4 and t != 5 and t != 8:
 		return null
 	var e := Enemy.new()
 	e.level = _level

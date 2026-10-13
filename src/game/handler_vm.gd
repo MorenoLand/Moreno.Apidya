@@ -191,7 +191,12 @@ func _set_globals() -> void:
 	cpu.w16(syms["player_x"], g.px)
 	cpu.w16(syms["player_y"], g.py)
 	cpu.w16(syms["scroll_step"], g.scroll_step())
-	cpu.w16(syms["scroll_lock"], 1 if g.scroll_locked else 0)
+	if syms.has("col_counter"):
+		cpu.w16(syms["col_counter"], g.col_counter())
+	if syms.has("lock_byte"):
+		cpu.w8(syms["scroll_lock"], 1 if g.scroll_locked else 0)
+	else:
+		cpu.w16(syms["scroll_lock"], 1 if g.scroll_locked else 0)
 	cpu.w16(0x9C4, g.difficulty())
 	cpu.w8(syms["heavy_frame"], 0x15 + ((g.tick >> 2) & 1))
 
@@ -228,9 +233,33 @@ func step(e: Enemy) -> void:
 	_sync_engine_state()
 
 
+## What the original's section routine ($99BE and friends) puts back in the engine variables when the next
+## part of the level starts: the per-tick routines of the guardian, the column freeze and the lock.
+func section_reset() -> void:
+	if not ok:
+		return
+	for key in ["scene_a", "scene_b"]:
+		if syms.has(key):
+			cpu.w32(int(syms[key]), 0)
+	if syms.has("col_freeze"):
+		cpu.w8(int(syms["col_freeze"]), 0)
+	g.col_frozen = false
+	if syms.has("lock_byte"):
+		cpu.w8(int(syms["scroll_lock"]), 0)
+	else:
+		cpu.w16(int(syms["scroll_lock"]), 0)
+
+
 ## Phase events and the scroll lock are written by the handlers.
 func _sync_engine_state() -> void:
-	g.scroll_locked = cpu.r16(syms["scroll_lock"]) != 0
+	if syms.has("lock_byte"):
+		g.scroll_locked = cpu.r8(syms["scroll_lock"]) != 0
+	else:
+		g.scroll_locked = cpu.r16(syms["scroll_lock"]) != 0
+	if syms.has("col_freeze"):
+		g.col_frozen = cpu.r8(syms["col_freeze"]) != 0
+	if syms.has("col_counter"):
+		g.col_set_by_handler(cpu.r16(syms["col_counter"]))
 	var pa := cpu.r16(syms["phase_a"])
 	if pa != 0:
 		g.phase_event = pa

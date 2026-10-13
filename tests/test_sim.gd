@@ -23,9 +23,23 @@ func _initialize() -> void:
 	Input.action_press("fire")
 	var spawned_max := 0
 	var god := false
+	var chase := false
+	var maxed := false
 	for a in OS.get_cmdline_user_args():
 		if a == "--god":
 			god = true
+		elif a == "--chase":
+			chase = true
+		elif a == "--max":
+			maxed = true
+	if maxed:
+		g._ps.weapon = 3
+		g._ps.w1 = 2
+		g._ps.w2 = 3
+		g._ps.w3 = 3
+		g._ps.pods = -1
+		g._ps.speed = 3
+		g._ps.bomb = 1
 	var pickups := 0
 	var last_bar := 0
 	var py_dir := 1
@@ -37,9 +51,23 @@ func _initialize() -> void:
 			py_dir = -1
 		elif g.py < 20:
 			py_dir = 1
-		Input.action_release("move_up")
-		Input.action_release("move_down")
-		Input.action_press("move_down" if py_dir > 0 else "move_up")
+		if chase:
+			# line up with the nearest enemy ahead (its hit box centre), a few pixels of sweep so that parts get hit
+			var target: Enemy = null
+			for e in g._enemies:
+				if e.dead or e.x < g.px or e.x > 330 or e.hit_h <= 0:
+					continue
+				if target == null or e.x < target.x:
+					target = e
+			if target != null:
+				var ty := int(target.y) + target.hit_h / 2 - 8 + (t / 6) % 15 - 7
+				g.py = clampi(g.py + clampi(ty - g.py, -4, 4), 3, 212)
+			else:
+				g.py = clampi(g.py + py_dir * 3, 3, 212)
+		else:
+			Input.action_release("move_up")
+			Input.action_release("move_down")
+			Input.action_press("move_down" if py_dir > 0 else "move_up")
 		g._physics_process(0.02)
 		if g._ps.bar != last_bar and g._ps.bar != 0:
 			pickups += 1

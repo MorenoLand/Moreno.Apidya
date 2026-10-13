@@ -22,6 +22,7 @@ var shot_art := {}                        # player shot / pod / enemy bullet ima
 var set_pieces: Array = []                # type 5 objects: {img, alt} opaque playfield blits
 var image_cache := {}
 var raw: PackedByteArray                  # unpacked level file (RAM base $0A00)
+var type8_pieces: Array = []             # level 5 type 8 objects: {img, w, h, xoff, yoff, hit_w, hit_h}
 var bomb_frames: Array = []              # bomb / crawler sprite frames {h, yoff, px: PackedByteArray of 0..3, 16 wide}
 var rec_const10 := 0x6D6A                 # the word the spawner stores at +$10 of every enemy record
 
@@ -44,6 +45,7 @@ static func load_level(disks: DiskSet, level_no: int) -> LevelData:
 	d._load_set_pieces()
 	d._find_record_constant()
 	d._load_bomb_frames()
+	d._load_type8_pieces()
 	return d
 
 
@@ -74,6 +76,32 @@ func _load_bomb_frames() -> void:
 						var bit := 15 - x
 						px[r * 16 + x] = ((a >> bit) & 1) | (((b >> bit) & 1) << 1)
 				bomb_frames.append({"h": h, "yoff": yoff, "px": px})
+			return
+
+
+## Level 5 draws its type 8 objects (guardian parts, turrets) as straight copies into the playfield: a 16 byte
+## table entry per frame (image address, rows, width in words, x and y offset, hit box). The table is found
+## through the dispatcher's `lea (t,PC),A3 ; lea (t,PC),A2 ; lea (t,PC),A4 ; moveq 0,D0 ; move.b (9,A0),D0`.
+func _load_type8_pieces() -> void:
+	var lim := mini(raw.size() - 24, 0x7000)
+	for i in range(0, lim):
+		if raw[i] == 0x47 and raw[i + 1] == 0xFA and raw[i + 4] == 0x45 and raw[i + 5] == 0xFA \
+				and raw[i + 8] == 0x49 and raw[i + 9] == 0xFA and raw[i + 12] == 0x70 and raw[i + 13] == 0x00 \
+				and raw[i + 14] == 0x10 and raw[i + 15] == 0x28 and raw[i + 16] == 0x00 and raw[i + 17] == 0x09:
+			var table := LevelDefs.RAM_BASE + i + 4 + 2 + BE.s16(raw, i + 6)
+			for f in 64:
+				var o := _off(table) + f * 16
+				if o + 16 > raw.size():
+					break
+				var gfx := BE.u32(raw, o)
+				var rows := BE.u16(raw, o + 4)
+				var wd := BE.u16(raw, o + 6)
+				if gfx < LevelDefs.RAM_BASE or gfx >= LevelDefs.RAM_BASE + raw.size() or rows < 1 or rows > 200 \
+						or wd < 1 or wd > 12:
+					break
+				type8_pieces.append({"img": _opaque_interleaved(gfx, wd, rows), "w": wd * 16, "h": rows,
+					"xoff": BE.s16(raw, o + 8), "yoff": BE.s16(raw, o + 10),
+					"hit_w": raw[o + 12], "hit_h": raw[o + 13]})
 			return
 
 
@@ -128,27 +156,41 @@ func _decode_tile(t: int, tile_base_off: int) -> PackedByteArray:
 
 func _load_map(def: Dictionary) -> void:
 	cols = def["cols"]
-	if cols == 0:
-		return
-	var mo := _off(def["map"])
+	var generated := def.has("gen_map")
+	var mo := 0
+	if generated:
+		# level 5: the level's own scroller routine produces the columns
+		var gen := ScrollerMap.generate(raw, def["gen_map"], VmSymbols.get_symbols(level))
+		cols = gen["cols"]
+		map_words = gen["words"]
+	else:
+		if cols == 0:
+			return
+		mo = _off(def["map"])
+		map_words.resize(ROWS * cols)
 	var tile_off := _off(def["tiles"])
-	map_words.resize(ROWS * cols)
 	var cache := {}
 	var width := cols * 16
 	var buf := PackedByteArray()
 	buf.resize(width * 240)
 	for r in ROWS:
 		for c in cols:
-			var w := BE.u16(raw, mo + (r * cols + c) * 2)
-			map_words[r * cols + c] = w
+			var w: int
+			if generated:
+				w = map_words[r * cols + c]
+			else:
+				w = BE.u16(raw, mo + (r * cols + c) * 2)
+				map_words[r * cols + c] = w
 			var t := w & 0x3FF
 			if not cache.has(t):
 				cache[t] = _decode_tile(t, tile_off)
 			var px: PackedByteArray = cache[t]
 			var dst := r * 16 * width + c * 16
+			var flip := (w & 0x400) != 0           # drawn bottom row first by the original's scroller
 			for y in 16:
+				var sy := 15 - y if flip else y
 				for x in 16:
-					buf[dst + y * width + x] = px[y * 16 + x]
+					buf[dst + y * width + x] = px[sy * 16 + x]
 	bg_image = Image.create_from_data(width, 240, false, Image.FORMAT_R8, buf)
 
 

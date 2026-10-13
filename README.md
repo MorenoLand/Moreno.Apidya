@@ -46,14 +46,14 @@ Early but playable prototype.
 | | |
 |---|---|
 | Front end | title, story pages, options (level, lives, team mode, extra select, 1up, control, sound test), high scores and name entry, with the original pictures, palettes, font, texts and menu music |
-| Levels 1-4 | backgrounds (tiles, maps, per-scanline Copper gradients), scrolling, player, enemy waves and movement |
+| Levels 1-5 | backgrounds (tiles, maps, per-scanline Copper gradients; level 5's is produced by running its own scroller routine once and kept in `user://cache`), scrolling, player, enemy waves and movement |
 | Enemies | path followers, scroll-locked objects, polar movers, timed formations; shooting, hit points, score |
 | Power-ups | capsules drop when a formation is wiped out; the 8-slot meter (speed, bomb, spread / missile / wave weapons with their levels, option pods, shield, slow down) with the original's auto-use rules; all weapon shot types and the charge blast |
 | Audio | all music and sound effects, rendered by the game's own replay routine (see below) |
-| Enemy handlers | the shooters, cannons, plants, throwers, mini guardians and level guardians of levels 1-4 are the original's own routines, run from the level file by the 68000 interpreter (see below) |
+| Enemy handlers | the shooters, cannons, plants, throwers, mini guardians and level guardians of all levels are the original's own routines, run from the level file by the 68000 interpreter (see below) |
 | Power-ups | bombs (lobbed bomb and the two terrain crawlers) in addition to the weapons above |
-| Playable | levels 1-4 can be played from start to guardian and beyond |
-| Not yet | level 5, the scrolling boss room of level 4, exact explosion graphics, HUD graphics, story animations, ending |
+| Playable | all five levels run from the start through their guardians |
+| Not yet | the scrolling boss room picture of level 4, the ending, exact explosion graphics, HUD graphics, story animations |
 
 ## How it works
 

@@ -5,6 +5,10 @@ extends RefCounted
 
 const RAM_BASE := 0xA00
 
+## Value of the wave column counter when the main loop starts (the original's code first draws the
+## screen's worth of columns): a wave with column c appears when c - this columns have scrolled in.
+const COL_START := {1: 21, 2: 21, 3: 21, 4: 20, 5: 20}
+
 const LEVELS := {
 	1: {"name": "Garden", "file": 2, "tiles": 0xC752, "planes": 5, "map": 0x1BD38, "cols": 460, "pal": 0x900A,
 		"bobs": 0x750E, "bob_count": 73, "player": 0x89D4, "player_gfx": 0x1F320,
@@ -26,7 +30,10 @@ const LEVELS := {
 		"waves": 0x7E80, "copper": 0x8400, "angle": 0x87F4,
 		"shots": 0x8ED8, "ball_script": 0x6E08, "phase": 0x87BC,
 		"item_gfx": 0x10B48, "item_mask": 0x162AE},
-	5: {"name": "Castle", "file": 17, "tiles": 0x1A178, "planes": 4, "map": 0, "cols": 0, "pal": 0x89B8,
+	5: {"name": "Castle", "file": 17, "scroll": 2.0, "end_col": 0x44A, "tiles": 0x1A178, "planes": 4, "map": 0, "cols": 0, "pal": 0x89B8,
+		"gen_map": {"init": 0xA00, "main": 0xAB0, "step": 0xD40, "col_var": 0x7ACC, "end_col": 0x44A,
+			"ptr_var": 0x7AB8, "tiles": 0x1A178, "tile_bytes": 128, "tile_size": 0x1001, "row_bytes": 184,
+			"right": 0x28},
 		"bobs": 0x75D6, "bob_count": 38, "player": 0x8384, "player_gfx": 0x21590,
 		"waves": 0x7BD0, "copper": 0x7FA8, "angle": 0x8204,
 		"shots": 0x88EC, "ball_script": 0x726A, "phase": 0x81CC,
