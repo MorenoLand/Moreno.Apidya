@@ -59,6 +59,7 @@ var _vdir := 0
 var _anim := 0
 var _anim_t := 0
 var _lives := 3
+var _options := {}
 var _score := 0
 var _invuln := 0
 var _fire_cd := 0
@@ -71,9 +72,16 @@ var _widescreen := false
 var _toast: Label
 
 
-func setup(disks: DiskSet, level_no: int) -> void:
+## `options` comes from the front end's option screen (see FrontEnd.game_options).
+func setup(disks: DiskSet, level_no: int, options: Dictionary = {}) -> void:
 	_disks = disks
 	_level_no = level_no
+	_options = options
+	_lives = int(options.get("lives", 3))
+
+
+func get_score() -> int:
+	return _score
 
 
 func _ready() -> void:

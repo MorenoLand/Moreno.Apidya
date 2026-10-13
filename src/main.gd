@@ -1,12 +1,13 @@
 extends Control
-## Start screen: finds the user's disk images (or asks for them) and launches a level.
+## Entry point: finds the user's disk images (or asks for them), then runs the front end and the game.
 
 var _disks: DiskSet
 var _status: Label
-var _buttons: VBoxContainer
+var _prompt: Control
 var _dialog: FileDialog
-var _game: Control
-var _menu: Control
+var _front: FrontEnd
+var _game: Game
+var _options := {}
 
 
 func _ready() -> void:
@@ -21,7 +22,7 @@ func _ready() -> void:
 	box.grow_vertical = Control.GROW_DIRECTION_BOTH
 	box.add_theme_constant_override("separation", 12)
 	add_child(box)
-	_menu = box
+	_prompt = box
 
 	var title := Label.new()
 	title.text = "APIDYA"
@@ -33,9 +34,10 @@ func _ready() -> void:
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(_status)
 
-	_buttons = VBoxContainer.new()
-	_buttons.add_theme_constant_override("separation", 6)
-	box.add_child(_buttons)
+	var choose := Button.new()
+	choose.text = "Choose folder..."
+	choose.pressed.connect(func() -> void: _dialog.popup_centered())
+	box.add_child(choose)
 
 	_dialog = FileDialog.new()
 	_dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
@@ -48,61 +50,49 @@ func _ready() -> void:
 	var res := DiskLocator.find()
 	if res["disks"] != null:
 		_disks = res["disks"]
-		_show_levels()
+		_open_front_end()
 	else:
 		_show_need_files(res["error"])
 
 
-func _clear_buttons() -> void:
-	for c in _buttons.get_children():
-		c.queue_free()
-
-
 func _show_need_files(error: String) -> void:
-	_clear_buttons()
+	_prompt.visible = true
 	_status.text = "Apidya's game files are needed.\n%s\n\nPut Disk.1 and Disk.2 (WHDLoad install) in assets/original/,\nor choose the folder that contains them." % error
-	var b := Button.new()
-	b.text = "Choose folder..."
-	b.pressed.connect(func() -> void: _dialog.popup_centered())
-	_buttons.add_child(b)
-
-
-func _show_levels() -> void:
-	_clear_buttons()
-	_status.text = "Choose a level"
-	for lv in LevelDefs.LEVELS.keys():
-		var def: Dictionary = LevelDefs.LEVELS[lv]
-		var b := Button.new()
-		b.text = "Level %d - %s" % [lv, def["name"]]
-		b.disabled = def["cols"] == 0
-		b.pressed.connect(_start_level.bind(lv))
-		_buttons.add_child(b)
 
 
 func _on_dir_selected(dir: String) -> void:
 	var res := DiskLocator.open_folder(dir)
 	if res["disks"] != null:
 		_disks = res["disks"]
-		_show_levels()
+		_open_front_end()
 	else:
 		_show_need_files(res["error"])
 
 
-func _start_level(lv: int) -> void:
-	_status.text = "Loading level %d..." % lv
-	await get_tree().process_frame
-	var g := Game.new()
-	g.setup(_disks, lv)
-	g.exited.connect(_on_game_exited)
-	g.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_game = g
-	_menu.visible = false
-	add_child(g)
+func _open_front_end(result: Dictionary = {}) -> void:
+	_prompt.visible = false
+	_front = FrontEnd.new()
+	_front.setup(_disks, result)
+	_front.start_game.connect(_on_start_game)
+	_front.quit_requested.connect(func() -> void: get_tree().quit())
+	add_child(_front)
+
+
+func _on_start_game(options: Dictionary) -> void:
+	_options = options
+	if _front:
+		_front.queue_free()
+		_front = null
+	_game = Game.new()
+	_game.setup(_disks, options["level"], options)
+	_game.exited.connect(_on_game_exited)
+	add_child(_game)
 
 
 func _on_game_exited() -> void:
+	var score := 0
 	if _game:
+		score = _game.get_score()
 		_game.queue_free()
 		_game = null
-	_menu.visible = true
-	_show_levels()
+	_open_front_end({"score": score, "difficulty": _options.get("difficulty", 2)})

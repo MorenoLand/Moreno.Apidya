@@ -32,8 +32,12 @@ func setup(disks: DiskSet, module_file: int, mdat: int, smpl: int, mix_rate: int
 	samples_per_tick = rate / 50
 	var mem := PackedByteArray()
 	mem.resize(RAM_SIZE)
+	# module first: the front end's own file (unpacked at $0A00) reaches over the replay code's address
+	var module_dest: int = disks.files[module_file]["dest"]
+	if Tpwm.is_packed(disks.get_raw(module_file)):
+		module_dest = LevelDefs.RAM_BASE
+	_blit(mem, disks.get_data(module_file), module_dest)
 	_blit(mem, disks.get_raw(CODE_FILE), disks.files[CODE_FILE]["dest"])
-	_blit(mem, disks.get_data(module_file), disks.files[module_file]["dest"])
 	cpu = M68K.new(mem)
 	paula = Paula.new()
 	paula.cpu = cpu

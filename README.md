@@ -31,11 +31,12 @@ No path is hard-coded anywhere.
 
 | | |
 |---|---|
-| Arrow keys | Move |
-| Space / Ctrl | Fire |
-| Esc | Back to the level menu |
+| Arrow keys | Move / change options |
+| Space / Enter / Ctrl | Fire / confirm |
+| Esc | Back (game -> front end, front end -> title, title -> quit) |
 | F2 | Switch between the original 4:3 picture and stretched widescreen (remembered) |
 | F11 | Fullscreen |
+| 1-5 (options screen) | Jump straight into that level (developer shortcut) |
 
 ## Status
 
@@ -43,10 +44,11 @@ Early but playable prototype.
 
 | | |
 |---|---|
+| Front end | title, story pages, options (level, lives, team mode, extra select, 1up, control, sound test), high scores and name entry, with the original pictures, palettes, font, texts and menu music |
 | Levels 1-4 | backgrounds (tiles, maps, per-scanline Copper gradients), scrolling, player, enemy waves and movement |
 | Enemies | path followers, scroll-locked objects, polar movers; shooting, hit points, score |
 | Audio | all music and sound effects, rendered by the game's own replay routine (see below) |
-| Not yet | level 5, bosses/guardians (native handler enemies), power-ups and weapon upgrades, HUD graphics, title/story screens |
+| Not yet | level 5, bosses/guardians (native handler enemies), power-ups and weapon upgrades, HUD graphics, story animations, ending |
 
 ## How it works
 
@@ -62,6 +64,11 @@ Early but playable prototype.
 Amiga's four-channel DMA audio (`Paula`). `AudioManager` runs that on a worker thread and streams the
 result, so songs and effects come straight from the original data with no pre-rendered audio.
 
+`src/frontend/` is the front end: `FrontEndData` reads the front-end file (RLE pictures, palette blocks, the 8x8
+font strip, texts, option tables, default high scores) and `FrontEnd` runs the screens with the original's
+colour-fade engine and option handlers. The option screen is two 1-bit text planes (green labels, blue
+alternatives, white selection), exactly like the original.
+
 `src/game/` is the new engine: a fixed 50 Hz loop that scrolls the map half a pixel per tick, spawns
 enemies from the wave table when their column scrolls in and moves them with the original path/polar
 scripts. Everything is drawn from colour-index textures through a per-scanline palette shader.
@@ -71,6 +78,7 @@ scripts. Everything is drawn from colour-index textures through a per-scanline p
 ```
 src/amiga/      readers for the original disk format and level data
 src/audio/      68000 interpreter, Paula model, TFMX player, audio manager
+src/frontend/   title, story, options, high scores (reads the front-end file of the original)
 src/game/       the game itself (level scene, enemies)
 shaders/        indexed-colour + per-scanline palette shader
 scenes/         start scene
@@ -84,10 +92,13 @@ With the game files available:
 
 ```
 redot --headless --path . --script res://tests/test_data.gd -- --disks=<folder>
+redot --headless --path . --script res://tests/test_frontend.gd -- --disks=<folder>
+redot --headless --path . --script res://tests/test_scene.gd -- --disks=<folder>   # title -> options -> game -> scores
 redot --headless --path . --script res://tests/test_sim.gd  -- --disks=<folder> --level=1
 redot --headless --path . --script res://tests/test_audio.gd -- --disks=<folder> --level=1 --seconds=10
 redot --headless --path . --script res://tests/test_audio_all.gd -- --disks=<folder>   # every song/effect
 redot --path . --script res://tests/shot.gd -- --disks=<folder> --out=shot.png --level=1 --ticks=700   # screenshot (needs a GPU)
+redot --path . --script res://tests/shot_frontend.gd -- --disks=<folder> --out=fe                       # front end screenshots
 ```
 
 ## Legal

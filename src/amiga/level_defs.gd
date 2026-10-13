@@ -26,6 +26,7 @@ const LEVELS := {
 ## TFMX music per level: disk file of the module, and the two addresses the level code passes to the
 ## player's init routine (module start, sample base). Each level starts song 0.
 const MUSIC := {
+	0: {"file": 0, "mdat": 0xE000, "smpl": 0x343F2},   # front end (title / options), embedded in file 0
 	1: {"file": 6, "mdat": 0x32000, "smpl": 0x33FD4},
 	2: {"file": 7, "mdat": 0x2E000, "smpl": 0x308B0},
 	3: {"file": 8, "mdat": 0x2E000, "smpl": 0x2FE94},
