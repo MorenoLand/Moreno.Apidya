@@ -45,11 +45,14 @@ var _meter_label: Label
 var _msg: Label
 var _tex_cache := {}
 
-var _scroll := 0.0
+var scroll := 0.0
+var scroll_locked := false     # a guardian holds the scroll ($7BAC)
+var phase_event := 0           # $7B50: guardian defeated / level section done
 var _col := -1
 var _wave_idx := 0
 var _enemies: Array[Enemy] = []
-var _bullets: Array[Dictionary] = []     # enemy bullets {x,y,vx,vy,spr}
+var _bullets: Array[Dictionary] = []     # enemy bullets {x,y,vx,vy,big,spr}
+var _explosions: Array[Dictionary] = []
 var _groups: Array = []                  # formation group slots (null or dictionary)
 var _items: Array[Dictionary] = []       # power-up capsules {x,y,spr}
 var _ps := PlayerState.new()
@@ -70,7 +73,7 @@ var _fire_t := 0
 var _fire_was_down := false
 var _dead_t := 0
 var _finished := false
-var _rng := RandomNumberGenerator.new()
+var rng := RandomNumberGenerator.new()
 var _audio: AudioManager
 var _arc: AspectRatioContainer
 var _widescreen := false
@@ -93,7 +96,7 @@ func get_score() -> int:
 
 
 func _ready() -> void:
-	_rng.seed = 1992
+	rng.seed = 1992
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_level = LevelData.load_level(_disks, _level_no)
 
@@ -249,13 +252,14 @@ func _physics_process(_delta: float) -> void:
 	_tick += 1
 	Enemy.phase_a = [0, 1, 2, 1][_tick & 3]
 	Enemy.phase_b = [1, 2, 1, 0][_tick & 3]
-	_scroll += SCROLL_STEP
-	var new_col := int(_scroll) / 16
-	var max_scroll := float(_level.cols * 16 - VIEW_W)
-	if _scroll >= max_scroll:
-		_scroll = max_scroll
+	if not scroll_locked:
+		scroll += SCROLL_STEP
+	var new_col := int(scroll) / 16
+	var maxscroll := float(_level.cols * 16 - VIEW_W)
+	if scroll >= maxscroll:
+		scroll = maxscroll
 		_finish("LEVEL COMPLETE")
-	_bg.region_rect = Rect2(int(_scroll), 0, VIEW_W, FIELD_H)
+	_bg.region_rect = Rect2(int(scroll), 0, VIEW_W, FIELD_H)
 	while new_col > _col:
 		_col += 1
 		_spawn_wave(_col)
@@ -263,12 +267,13 @@ func _physics_process(_delta: float) -> void:
 	_tick_groups()
 	_update_player()
 	_update_enemies()
-	_weapons.tick(px, py, _scroll, _enemies, px != _prev_px or py != _prev_py)
+	_weapons.tick(px, py, scroll, _enemies, px != _prev_px or py != _prev_py)
 	_prev_px = px
 	_prev_py = py
 	_reap_dead()
 	_update_items()
 	_update_bullets()
+	_update_explosions()
 	_collide()
 	_update_hud()
 
@@ -296,14 +301,17 @@ func _spawn_wave(col: int) -> void:
 			_spawn_enemy(w, -1)
 
 
-func _spawn_enemy(w: Dictionary, group_slot: int) -> void:
+func _spawn_enemy(w: Dictionary, group_slot: int) -> Enemy:
 	var e := Enemy.new()
-	e.init_from_wave(w, _level, _scroll, group_slot)
+	e.init_from_wave(w, _level, scroll, group_slot)
+	if e.type == 4 or e.type == 5:
+		e.handler = Handlers.lookup(_level_no, e.handler_addr)
 	e.spr = Sprite2D.new()
 	e.spr.centered = false
 	e.spr.material = _mat
 	_world.add_child(e.spr)
 	_enemies.append(e)
+	return e
 
 
 func _start_group(w: Dictionary) -> void:
@@ -344,10 +352,10 @@ func _enemy_gone(e: Enemy, killed: bool) -> void:
 		g["killed"] += 1
 		if g["required"] > 0 and g["killed"] == g["required"]:
 			g["killed"] = 0
-			_drop_item(e.x, e.y)
+			drop_item(e.x, e.y)
 
 
-func _drop_item(x: float, y: float) -> void:
+func drop_item(x: float, y: float) -> void:
 	var spr := Sprite2D.new()
 	spr.centered = false
 	spr.material = _mat
@@ -360,13 +368,11 @@ func _update_enemies() -> void:
 	for e in _enemies:
 		if e.dead:
 			continue
-		e.tick(_level, px, py, _scroll, _rng)
+		e.tick(self)
 		if e.dead:
 			continue
-		e.update_sprite(_level, FIELD_Y, X_OFFSET, _tex)
+		e.update_sprite(self, FIELD_Y, X_OFFSET, _tex)
 		e.spr.material = _mat_flash if e.flash > 0 else _mat
-		if e.want_fire(_rng):
-			_enemy_fire(e)
 
 
 ## Removes dead enemies (destroyed or gone) and does the group bookkeeping.
@@ -375,7 +381,13 @@ func _reap_dead() -> void:
 	for e in _enemies:
 		if e.dead:
 			_enemy_gone(e, e.killed)
+			if e.killed and e.on_death.is_valid():
+				e.on_death.call(self, e)
+			if e.killed and not e.dying:
+				explode(e.x + 4.0, e.y + 4.0)
 			e.spr.queue_free()
+			for part in e.parts:
+				part.queue_free()
 		else:
 			keep.append(e)
 	_enemies = keep
@@ -395,7 +407,8 @@ func _on_weapon_sound(effect: int) -> void:
 func _update_items() -> void:
 	var keep: Array[Dictionary] = []
 	for it in _items:
-		it["x"] -= SCROLL_STEP
+		if not scroll_locked:
+			it["x"] -= SCROLL_STEP
 		if it["x"] < -20.0:
 			it["spr"].queue_free()
 			continue
@@ -477,19 +490,181 @@ func _update_player() -> void:
 		_use_meter()
 
 
-# ---- enemy bullets ---------------------------------------------------------------------------------
-func _enemy_fire(e: Enemy) -> void:
-	var sx := e.x + 4.0
-	var sy := e.y + 4.0
-	var dxp := float(px + 4) - sx
-	var dyp := float(py + 10) - sy
-	var len := maxf(1.0, sqrt(dxp * dxp + dyp * dyp))
+# ---- engine services used by the enemy handlers ------------------------------------------------------
+func sfx(n: int) -> void:
+	_audio.sfx(n)
+
+
+func difficulty() -> int:
+	return int(_options.get("difficulty", 2))
+
+
+## The original's $7B5C: toggles 0 / 1 every tick, so "x -= $7B5C" scrolls half a pixel per tick.
+func scroll_step() -> int:
+	return 0 if scroll_locked else (_tick & 1)
+
+
+func _vel_scale(v: float) -> float:
+	var d := difficulty()
+	if d < 2:
+		return v * 0.75
+	if d > 2:
+		return v * 1.5
+	return v
+
+
+func _add_bullet(x: float, y: float, vx: float, vy: float, big: bool = false) -> void:
 	var s := Sprite2D.new()
 	s.centered = false
 	s.material = _mat
 	_world.add_child(s)
-	_bullets.append({"x": sx, "y": sy, "vx": dxp / len * 2.0, "vy": dyp / len * 2.0, "spr": s})
-	_audio.sfx(SFX_ENEMY_FIRE)
+	_bullets.append({"x": x, "y": y, "vx": vx, "vy": vy, "big": big, "spr": s})
+
+
+## `$535A`: shot aimed at the player, 2 px per tick (practice / easy: not at point blank).
+func fire_aimed(x: float, y: float) -> void:
+	if y < 0.0:
+		return
+	if difficulty() < 2 and absf(x - px) + absf(y - py) <= 0x5A:
+		return
+	var dx := float(px + 8) - x
+	var dy := float(py + 10) - y
+	var len := sqrt(dx * dx + dy * dy)
+	if len < 0.5:
+		return
+	_add_bullet(x, y, _vel_scale(dx / len * 2.0), _vel_scale(dy / len * 2.0))
+	sfx(SFX_ENEMY_FIRE)
+
+
+## `$53E4`: shot with velocity (d2, d3) given in the original's 16.16 units (0x80000 = 4 px per tick).
+func fire_vel(x: float, y: float, d2: int, d3: int) -> void:
+	if (d2 >> 9) == 0 and (d3 >> 9) == 0:
+		return
+	_add_bullet(x, y, _vel_scale(float(d2) / 131072.0), _vel_scale(float(d3) / 131072.0))
+
+
+const DIR_DX1 := [0, 0, 1, 1, 1, 1, 1, 0, 0, 0, -1, -1, -1, -1, -1, 0]
+const DIR_DY1 := [-1, -1, -1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, -1, -1]
+const DIR_DX2 := [0, 1, 2, 2, 2, 2, 2, 1, 0, -1, -2, -2, -2, -2, -2, -1]
+const DIR_DY2 := [-2, -2, -2, -1, 0, 1, 2, 2, 2, 2, 2, 1, 0, -1, -2, -2]
+
+
+## `$531E`: bullet of the given type word (low 5 bits = kind, high byte = direction index * 2).
+func fire_dir(x: float, y: float, word: int) -> void:
+	var kind := word & 0x1F
+	var idx := ((word >> 8) & 0x1F) >> 1
+	match kind:
+		1:
+			_add_bullet(x, y, DIR_DX1[idx], DIR_DY1[idx])
+		3:
+			_add_bullet(x, y, -4.0, -4.0, true)
+		_:
+			_add_bullet(x, y, DIR_DX2[idx], DIR_DY2[idx])
+
+
+## `$441A`: a falling object that follows the level's "ball" script.
+func spawn_ball(x: float, y: float) -> void:
+	var w := {"type": 2, "flags": 0, "x": int(x), "y": int(y), "hp": 127, "frame": 0,
+		"script": _level_def_value("ball_script"), "p6": 0, "p7": 0, "score_bcd": 0,
+		"fire_timer": 255, "fire_reload": 255, "handler": 0, "p11": 0}
+	_spawn_enemy(w, -1)
+
+
+## `$446C`: heavy projectile aimed at the player (4 px per tick), an enemy with 127 hit points.
+func spawn_heavy(x: float, y: float) -> void:
+	if difficulty() < 2 and absf(x - px) + absf(y - py) <= 0x5A:
+		return
+	var dx := float(px + 8) - x
+	var dy := float(py + 10) - y
+	var len := sqrt(dx * dx + dy * dy)
+	if len < 0.5:
+		return
+	var w := {"type": 4, "flags": 0, "x": int(x), "y": int(y), "hp": 127, "frame": 0x27, "script": 0,
+		"p6": 0, "p7": 0, "score_bcd": 0, "fire_timer": 255, "fire_reload": 255, "handler": 0, "p11": 0}
+	var e := _spawn_enemy(w, -1)
+	e.handler = Callable(self, "_heavy_handler")
+	e.vx = _vel_scale(dx / len * 4.0)
+	e.vy = _vel_scale(dy / len * 4.0)
+
+
+## An enemy built from code: handler-driven, drawn by the handler through draw_part.
+func spawn_native(x: float, y: float, hp: int, frame: int, handler: Callable, hit_w: int, hit_h: int) -> Enemy:
+	var w := {"type": 4, "flags": 0, "x": int(x), "y": int(y), "hp": hp, "frame": frame, "script": 0,
+		"p6": 0, "p7": 0, "score_bcd": 0, "fire_timer": 255, "fire_reload": 255, "handler": 0, "p11": 0}
+	var e := _spawn_enemy(w, -1)
+	e.handler = handler
+	e.set_hitbox(hit_w, hit_h)
+	return e
+
+
+## Extra sprite of an enemy (guardian pieces, thrown balls) at raw position (x, y).
+func draw_part(e: Enemy, idx: int, img: Image, x: float, y: float) -> void:
+	while e.parts.size() <= idx:
+		var s := Sprite2D.new()
+		s.centered = false
+		s.material = _mat
+		_world.add_child(s)
+		e.parts.append(s)
+	var sp := e.parts[idx]
+	sp.texture = _tex(img)
+	sp.position = Vector2(x - X_OFFSET, y + FIELD_Y)
+	sp.visible = true
+	sp.material = _mat_flash if e.flash > 0 else _mat
+
+
+func level_plane_image(gfx: int, mask: int, w_words: int, rows: int) -> Image:
+	return _level.plane_image(gfx, mask, w_words, rows)
+
+
+## `$5DD4`-style boomerang shot: starts at 4 px per tick, slows down by 0.19 per tick and zig-zags
+## vertically between -2 and +2 px per tick.
+func fire_boomerang(x: float, y: float, dir: int) -> void:
+	var s := Sprite2D.new()
+	s.centered = false
+	s.material = _mat
+	_world.add_child(s)
+	_bullets.append({"x": x, "y": y, "vx": 4.0, "vy": 0.0, "big": false, "spr": s, "zig": dir,
+		"ax": -float(0x30) / 256.0})
+
+
+func _heavy_handler(_g: Game, e: Enemy) -> void:
+	e.frame = ((_tick >> 2) & 1) + 0x15
+	e.x += e.vx
+	e.y += e.vy
+	if e.x < 0.0 or e.y < 0.0 or e.x > 0x15E or e.y > 0xE0:
+		e.dead = true
+
+
+func _level_def_value(key: String) -> int:
+	return int(LevelDefs.LEVELS[_level_no][key])
+
+
+## `$269E`: small explosion made of the wave shot orbs.
+func explode(x: float, y: float) -> void:
+	if x > 0x14E or y > 0xEF or x < 0.0 or y < 0.0:
+		return
+	var s := Sprite2D.new()
+	s.centered = false
+	s.material = _mat
+	_world.add_child(s)
+	_explosions.append({"x": x, "y": y, "t": 0, "spr": s})
+
+
+func _update_explosions() -> void:
+	var order := [0, 1, 2, 2, 1, 0]
+	var keep: Array[Dictionary] = []
+	var orbs: Array = _level.shot_art["wave_b"]
+	for ex in _explosions:
+		var f: int = ex["t"] / 2
+		if f >= order.size():
+			ex["spr"].queue_free()
+			continue
+		var img: Image = orbs[order[f]]
+		ex["spr"].texture = _tex(img)
+		ex["spr"].position = Vector2(ex["x"] - X_OFFSET, ex["y"] + FIELD_Y + 6 - img.get_height() / 2)
+		ex["t"] += 1
+		keep.append(ex)
+	_explosions = keep
 
 
 func _update_bullets() -> void:
@@ -497,12 +672,22 @@ func _update_bullets() -> void:
 	var frame_img: Image = frames[(_tick >> 2) & 7]
 	var keep: Array[Dictionary] = []
 	for b in _bullets:
+		if b.has("zig"):
+			b["vx"] += b["ax"]
+			if b["zig"] != 0:
+				b["vy"] += 0.125
+				if b["vy"] >= 2.0:
+					b["zig"] = 0
+			else:
+				b["vy"] -= 0.125
+				if b["vy"] <= -2.0:
+					b["zig"] = 1
 		b["x"] += b["vx"]
 		b["y"] += b["vy"]
-		if b["x"] < -10 or b["x"] > 340 or b["y"] < -10 or b["y"] > 250:
+		if b["x"] < 0x10 or b["x"] >= 0x154 or b["y"] < 0 or b["y"] >= 0xE6:
 			b["spr"].queue_free()
 			continue
-		b["spr"].texture = _tex(frame_img)
+		b["spr"].texture = _tex(_level.shot_art["enemy_big"] if b["big"] else frame_img)
 		b["spr"].position = Vector2(b["x"] - X_OFFSET, b["y"] + FIELD_Y)
 		keep.append(b)
 	_bullets = keep

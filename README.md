@@ -50,7 +50,8 @@ Early but playable prototype.
 | Enemies | path followers, scroll-locked objects, polar movers, timed formations; shooting, hit points, score |
 | Power-ups | capsules drop when a formation is wiped out; the 8-slot meter (speed, bomb, spread / missile / wave weapons with their levels, option pods, shield, slow down) with the original's auto-use rules; all weapon shot types and the charge blast |
 | Audio | all music and sound effects, rendered by the game's own replay routine (see below) |
-| Not yet | level 5, bosses/guardians (native handler enemies), explosions, HUD graphics, original enemy bullet patterns, story animations, ending |
+| Level 1 handlers | the native-handler enemies of level 1 (shooters, cannons, plants, throwers, mini guardian, level guardian) ported from the original's routines |
+| Not yet | level 5, handlers of levels 2-5, exact explosion graphics, HUD graphics, story animations, ending |
 
 ## How it works
 

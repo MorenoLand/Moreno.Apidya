@@ -47,7 +47,7 @@ func _initialize() -> void:
 		spawned_max = maxi(spawned_max, g._enemies.size())
 		if t % 500 == 0:
 			print("tick %5d scroll=%7.1f col=%3d enemies=%2d shots=%d bullets=%d items=%d bar=%d score=%d lives=%d" % [
-				t, g._scroll, g._col, g._enemies.size(), g._weapons.shots.size(), g._bullets.size(), g._items.size(),
+				t, g.scroll, g._col, g._enemies.size(), g._weapons.shots.size(), g._bullets.size(), g._items.size(),
 				g._ps.bar, g._score, g._lives])
 		if g._finished:
 			print("finished at tick ", t, ": ", g._msg.text.replace("\n", " "))

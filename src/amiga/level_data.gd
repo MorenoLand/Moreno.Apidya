@@ -19,6 +19,8 @@ var waves: Array = []                     # dictionaries, see _parse_waves
 var angle_table := PackedInt32Array()     # 24 signed 16.16 values, index (byte_off/4 + 8)
 var item_img: Image                       # power-up capsule, 16 x 15 LA8
 var shot_art := {}                        # player shot / pod / enemy bullet images, see _load_shot_art
+var set_pieces: Array = []                # type 5 objects: {img, alt} opaque playfield blits
+var image_cache := {}
 var raw: PackedByteArray                  # unpacked level file (RAM base $0A00)
 
 
@@ -37,6 +39,7 @@ static func load_level(disks: DiskSet, level_no: int) -> LevelData:
 	d._load_angles(def)
 	d.item_img = d._planar_masked(def["item_gfx"], def["item_mask"], 1, 15, d.planes)
 	d._load_shot_art(def)
+	d._load_set_pieces()
 	return d
 
 
@@ -233,6 +236,74 @@ func _find_enemy_bullet_consts() -> Dictionary:
 			return {"d3": BE.u16(raw, i + 2), "mask": BE.u32(raw, i + 10)}
 		i += 2
 	return {"d3": 0x782, "mask": 0}
+
+
+## Type 5 objects are straight copies into the playfield: a 16-byte table entry per frame
+## (image, alternate image, ..., blit size, modulo); found through the blitter set-up of the type 5 code.
+func _load_set_pieces() -> void:
+	var end := mini(raw.size() - 24, 0x6000 - LevelDefs.RAM_BASE)
+	var i := 0
+	var table := -1
+	while i < end:
+		if raw[i] == 0x2B and raw[i + 1] == 0x7C and raw[i + 2] == 0x09 and raw[i + 3] == 0xF0 \
+				and raw[i + 8] == 0x2B and raw[i + 9] == 0x7C and raw[i + 14] == 0x00 and raw[i + 15] == 0x44 \
+				and raw[i + 16] == 0x45 and raw[i + 17] == 0xF9:
+			table = BE.u32(raw, i + 18)
+			break
+		i += 2
+	if table < 0:
+		return
+	for f in 40:
+		var o := _off(table) + f * 16
+		if o + 16 > raw.size():
+			break
+		var g1 := BE.u32(raw, o)
+		var g2 := BE.u32(raw, o + 4)
+		var size := BE.u16(raw, o + 12)
+		if g1 == 0 or g1 > 0x70000:
+			break
+		var w := size & 63
+		var rows := (size >> 6) / planes
+		if w < 1 or w > 8 or rows < 1 or rows > 200:
+			break
+		set_pieces.append({"img": _opaque_interleaved(g1, w, rows), "alt": _opaque_interleaved(g2, w, rows),
+			"w": w * 16, "h": rows})
+
+
+func _opaque_interleaved(gfx_ram: int, w_words: int, rows: int) -> Image:
+	var buf := PackedByteArray()
+	buf.resize(w_words * 16 * rows * 2)
+	var go := _off(gfx_ram)
+	var p := 0
+	for y in rows:
+		for wd in w_words:
+			var pw: Array[int] = []
+			for pl in planes:
+				var o := go + ((y * planes + pl) * w_words + wd) * 2
+				pw.append(BE.u16(raw, o) if o >= 0 and o + 1 < raw.size() else 0)
+			for x in 16:
+				var m := 0x8000 >> x
+				var c := 0
+				for pl in planes:
+					if pw[pl] & m:
+						c |= 1 << pl
+				buf[p] = c
+				buf[p + 1] = 255
+				p += 2
+	return Image.create_from_data(w_words * 16, rows, false, Image.FORMAT_LA8, buf)
+
+
+func read_u8(ram_addr: int) -> int:
+	var o := _off(ram_addr)
+	return raw[o] if o >= 0 and o < raw.size() else 0xFF
+
+
+## Plane-major masked sprite (bobs, pods, capsule) cached by address.
+func plane_image(gfx: int, mask: int, w_words: int, rows: int) -> Image:
+	var k := "%x_%x_%d_%d" % [gfx, mask, w_words, rows]
+	if not image_cache.has(k):
+		image_cache[k] = _planar_masked(gfx, mask, w_words, rows, planes)
+	return image_cache[k]
 
 
 func _load_bobs(def: Dictionary) -> void:
