@@ -127,11 +127,11 @@ func render(copper: int, regs_in: Dictionary) -> Image:
 					var c := Color8((col >> 16) & 255, (col >> 8) & 255, col & 255)
 					if hires:
 						var ox := x0 * 2 + wi * 16 + bit
-						if ox >= 0 and ox < width_px * 2:
+						if ox >= 0 and ox < mini(width_px * 2, WIDTH):
 							img.set_pixel(ox, line, c)
 					else:
 						var lx := x0 + wi * 16 + bit
-						if lx >= 0 and lx < width_px:
+						if lx >= 0 and lx < mini(width_px, WIDTH / 2):
 							img.set_pixel(lx * 2, line, c)
 							img.set_pixel(lx * 2 + 1, line, c)
 		# sprites (not attached): plain 16 pixel wide, 3 colours

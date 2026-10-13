@@ -266,6 +266,19 @@ func _physics_process(_delta: float) -> void:
 	if _finished:
 		return
 	tick += 1
+	if _ready_t > 0:
+		_ready_t -= 1
+		if _ready_label == null:
+			_ready_label = Label.new()
+			_ready_label.add_theme_font_size_override("font_size", 10)
+			_ready_label.position = Vector2(104, 100)
+			_vp.add_child(_ready_label)
+			_ready_label.text = "PLAYER ONE
+
+   READY"
+		_ready_label.visible = _ready_t > 0
+		_update_player()
+		return
 	Enemy.phase_a = [0, 1, 2, 1][tick & 3]
 	Enemy.phase_b = [1, 2, 1, 0][tick & 3]
 	if not scroll_locked:
@@ -318,6 +331,8 @@ func _physics_process(_delta: float) -> void:
 # ---- level sections: the guardians raise "phase events" ($7B50) -------------------------------------
 var _phase_t := 0
 var _phase_label: Label
+var _ready_label: Label
+var _ready_t := 75              # "PLAYER ONE READY" before the level starts and after a lost ship
 
 
 ## A defeated guardian: fanfare, everything on screen explodes, a short bonus count, then the map
@@ -331,8 +346,13 @@ func _check_phase() -> void:
 			if e.dying or e.dead:
 				continue
 			if e.vm_slot >= 0:
+				# the original's section routine clears the hit point byte of every record and starts the
+				# level state afresh: handlers that restore their byte each tick (levels 4, 5) are gone too
+				_score += e.score
 				e.hp = 0
 				e.flash_bit = false
+				e.dead = true
+				e.killed = true
 			else:
 				e.hit(1000)
 		for b in _bullets:
@@ -343,12 +363,14 @@ func _check_phase() -> void:
 			_phase_label.add_theme_font_size_override("font_size", 10)
 			_phase_label.position = Vector2(100, 100)
 			_vp.add_child(_phase_label)
-		_phase_label.text = "SECTION CLEAR"
+		_phase_label.text = _section_text()
 		_phase_label.visible = true
 	if _phase_t > 0:
 		_phase_t -= 1
 		if _phase_t > 200 and (tick & 1) == 0:
 			_score += 10
+		if _phase_label != null:
+			_phase_label.text = _section_text()
 		if _phase_t == 0:
 			_end_phase()
 
@@ -360,6 +382,13 @@ func col_counter() -> int:
 func col_set_by_handler(value: int) -> void:
 	if value != _col and value > 0:
 		_col_override = value
+
+
+## The text of the original's section routine ($8C4A): STAGE n-m CLEAR and the score.
+func _section_text() -> String:
+	return "STAGE %d-%d CLEAR
+
+SCORE %06d" % [_level_no, clampi(phase_event, 1, 9), _score % 1000000]
 
 
 func _end_phase() -> void:
@@ -388,9 +417,44 @@ func jump_to_col(target: int) -> void:
 	_col = target
 	_col_started = true
 	var waves := _level.waves
+	_wave_idx = 0
 	while _wave_idx < waves.size() and (waves[_wave_idx]["col"] <= target):
 		_wave_idx += 1
 	_groups.clear()
+
+
+## A lost ship sends the level back to the restart column of the table at or below counter - 23 ($9336):
+## everything on the field goes, the waves of that column on come again.
+func _restart_at_checkpoint() -> void:
+	var wanted := maxi(_col - 23, 0)
+	var restart := 0
+	for c in _level.checkpoints:
+		if c <= wanted:
+			restart = c
+	for e in _enemies:
+		e.dead = true
+		e.killed = false
+		e.group = -1
+	_reap_dead()
+	for b in _bullets:
+		b["spr"].queue_free()
+	_bullets.clear()
+	for it in _items:
+		it["spr"].queue_free()
+	_items.clear()
+	_weapons.clear_shots()
+	if _vm != null:
+		_vm.section_reset()
+	phase_event = 0
+	_phase_t = 0
+	if _phase_label != null:
+		_phase_label.visible = false
+	scroll_locked = false
+	col_frozen = false
+	_col_override = -1
+	jump_to_col(restart + _col_start)
+	_music_check(true)
+	_ready_t = 75
 
 
 ## The level music has several parts that follow the map position ($98F2).
@@ -748,6 +812,7 @@ func _update_player() -> void:
 			_invuln = 100
 			px = 40
 			py = 100
+			_restart_at_checkpoint()
 		return
 	var dx := int(Input.is_action_pressed("move_right")) - int(Input.is_action_pressed("move_left"))
 	var dy := int(Input.is_action_pressed("move_down")) - int(Input.is_action_pressed("move_up"))

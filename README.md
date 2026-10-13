@@ -106,6 +106,8 @@ redot --headless --path . --script res://tests/test_data.gd -- --disks=<folder>
 redot --headless --path . --script res://tests/test_frontend.gd -- --disks=<folder>
 redot --headless --path . --script res://tests/test_scene.gd -- --disks=<folder>   # title -> options -> game -> scores
 redot --headless --path . --script res://tests/test_sim.gd  -- --disks=<folder> --level=1
+redot --headless --path . --script res://tests/test_sim.gd  -- --disks=<folder> --level=5 --ticks=30000 --god --chase --max   # plays a level with a simple autopilot
+redot --path . --script res://tests/amiga_view.gd -- --disks=<folder> --level=1 --frames=300 --out=view     # picture of the original's own code run in the interpreter (reference)
 redot --headless --path . --script res://tests/test_audio.gd -- --disks=<folder> --level=1 --seconds=10
 redot --headless --path . --script res://tests/test_audio_all.gd -- --disks=<folder>   # every song/effect
 redot --path . --script res://tests/shot.gd -- --disks=<folder> --out=shot.png --level=1 --ticks=700   # screenshot (needs a GPU)

@@ -35,6 +35,10 @@ func _initialize() -> void:
 	mem.resize(0x80000)
 	for i in raw.size():
 		mem[BASE + i] = raw[i]
+	# the front end's file stays in memory at $40000 while a level runs: its font strip ($FE90) is the HUD font
+	var front := disks.get_data(0)
+	for i in mini(front.size(), 0x3F5F0):
+		mem[0x40A10 + i] = front[i]
 	var label := -1
 	for i in range(0, 0x600, 2):
 		if raw[i] == 0x20 and raw[i + 1] == 0x39 and raw[i + 2] == 0 and raw[i + 3] == 0xDF and raw[i + 4] == 0xF0 \
@@ -75,4 +79,10 @@ func _save(disp: AmigaDisplay, name: String) -> void:
 	var cop := ((int(chip.regs.get(0x80, 0)) & 0xFFFF) << 16) | (int(chip.regs.get(0x82, 0)) & 0xFFFE)
 	var img := disp.render(cop, chip.regs)
 	img.save_png("G:/Development/Working/Amiga/analysis/renders/%s.png" % name)
+	var top := img.get_region(Rect2i(0, 36, 640, 20))
+	top.resize(1280, 80, Image.INTERPOLATE_NEAREST)
+	top.save_png("G:/Development/Working/Amiga/analysis/renders/%s_top.png" % name)
+	var bottom := img.get_region(Rect2i(0, 282, 640, 30))
+	bottom.resize(1280, 60, Image.INTERPOLATE_NEAREST)
+	bottom.save_png("G:/Development/Working/Amiga/analysis/renders/%s_bottom.png" % name)
 	print("saved %s (copper %X)" % [name, cop])

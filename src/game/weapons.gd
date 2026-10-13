@@ -271,6 +271,23 @@ func tick(px: int, py: int, scroll: float, enemies: Array[Enemy], moved: bool) -
 
 
 ## A shot used up by the original's own code (a handler tested it against its parts).
+## All shots, the bomb and the blast are gone (the level restarts).
+func clear_shots() -> void:
+	for s in shots:
+		for sp in s.sprites:
+			sp.queue_free()
+	shots.clear()
+	basic_count = 0
+	special_count = 0
+	bomb_x = -1
+	_bomb_spr.visible = false
+	_crawl_x = [-1, -1]
+	for c in _crawl_spr:
+		c.visible = false
+	blast_x = -1
+	_blast_sprite.visible = false
+
+
 func consume(s: Shot) -> void:
 	_remove(s)
 
