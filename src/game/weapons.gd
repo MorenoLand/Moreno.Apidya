@@ -270,6 +270,16 @@ func tick(px: int, py: int, scroll: float, enemies: Array[Enemy], moved: bool) -
 	_update_bombs(scroll, enemies)
 
 
+## A shot used up by the original's own code (a handler tested it against its parts).
+func consume(s: Shot) -> void:
+	_remove(s)
+
+
+func consume_blast() -> void:
+	blast_x = -1
+	_blast_sprite.visible = false
+
+
 func _remove(s: Shot) -> void:
 	if s.dead:
 		return
@@ -377,7 +387,9 @@ func _step_wave(s: Shot) -> void:
 func _wall_test(s: Shot, scroll: float) -> void:
 	if level.cols == 0:
 		return
-	var wx := s.x - X_OFFSET + int(scroll)
+	# the original tests the tile of the column counter plus raw x / 16 (no scroll phase): the picture's
+	# phase is not part of it, so the test point is ahead of the drawn tip by the phase
+	var wx := s.x + int(scroll) - (int(scroll) & 15)
 	var col := wx >> 4
 	var row := s.y >> 4
 	if col < 0 or col >= level.cols or row < 0 or row >= LevelData.ROWS:
@@ -575,12 +587,17 @@ func _update_bombs(scroll: float, enemies: Array[Enemy]) -> void:
 
 ## Does the 8x8 quadrant of the playfield under the raw point (x, y) have its collision bit set?
 func _solid_at(x: int, y: int, scroll: float) -> bool:
-	var wx := x - X_OFFSET + int(scroll)
+	return solid_world(x + int(scroll) - (int(scroll) & 15), y)
+
+
+## Is the 8x8 quadrant of the map under the world point (wx, y) marked solid? `y` is the raw row
+## ($7800 collision bits of the tile word, quadrant chosen by bit 3 of x and y).
+func solid_world(wx: int, y: int) -> bool:
 	var w := _tile(wx >> 4, y >> 4) & 0x7800
 	if w == 0:
 		return false
 	var bit: int
-	if x & 8:
+	if wx & 8:
 		bit = 0x0800 if (y & 8) else 0x2000
 	else:
 		bit = 0x1000 if (y & 8) else 0x4000
@@ -589,7 +606,7 @@ func _solid_at(x: int, y: int, scroll: float) -> bool:
 
 ## The state of a crawler (0..4 = vertical speed -4..4) follows the walls around it ($3812..$3916).
 func _crawl_turn(i: int, scroll: float) -> void:
-	var col := (_crawl_x[i] - X_OFFSET + int(scroll)) >> 4
+	var col := (_crawl_x[i] + int(scroll) - (int(scroll) & 15)) >> 4
 	var row := _crawl_y[i] >> 4
 	var mask := 0x1800 if (_crawl_y[i] & 8) else 0x6000
 	var s: int = _crawl_s[i]

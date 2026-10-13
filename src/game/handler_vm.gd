@@ -54,6 +54,8 @@ var rec_size := 0x20
 var hp_mask := 0x7F
 var unhooked := {}
 var draw_base := DRAW_FALLBACK
+var _mirrored: Array = []       # the native shots written into the original's shot list this run
+const MIRROR_SLOTS := 18
 var _pending: Array = []        # draw records the handler flushed through the engine's list processor
 
 
@@ -86,12 +88,13 @@ func _init(game: Game, lv: LevelData, level_no: int) -> void:
 	hooks[syms["sfx"]] = Callable(self, "_hk_sfx")
 	if syms.has("music"):
 		hooks[syms["music"]] = Callable(self, "_hk_music")
-	if syms.has("hit_shots"):
-		hooks[syms["hit_shots"]] = Callable(self, "_hk_hit_shots")
-	if syms.has("hit_bomb"):
-		hooks[syms["hit_bomb"]] = Callable(self, "_hk_hit_bomb")
-	if syms.has("hit_blast"):
-		hooks[syms["hit_blast"]] = Callable(self, "_hk_hit_blast")
+	if not syms.has("shot_list"):
+		if syms.has("hit_shots"):
+			hooks[syms["hit_shots"]] = Callable(self, "_hk_hit_shots")
+		if syms.has("hit_bomb"):
+			hooks[syms["hit_bomb"]] = Callable(self, "_hk_hit_bomb")
+		if syms.has("hit_blast"):
+			hooks[syms["hit_blast"]] = Callable(self, "_hk_hit_blast")
 	hooks[syms["score"]] = Callable(self, "_hk_score")
 	draw_base = int(syms.get("draw_base", DRAW_FALLBACK))
 	if syms.has("draw_list"):
@@ -206,6 +209,7 @@ func step(e: Enemy) -> void:
 		return
 	_write_record(e)
 	_set_globals()
+	_write_shots()
 	var a := _addr(e.vm_slot)
 	_blits.clear()
 	_pending.clear()
@@ -226,11 +230,57 @@ func step(e: Enemy) -> void:
 		return
 	var draw_end := int(cpu.a[6])
 	_apply_scratch_bullet()
+	_read_shots()
 	_read_record(e)
 	_collect_draws(e, draw_end)
 	e.vm_blits = _blits.duplicate()
 	_adopt_new()
 	_sync_engine_state()
+
+
+## The player's shots, bomb and blast are native. Handlers and scene routines test them with inline code
+## against the original's shot list, so the list is written before every run and what the code used up
+## (record cleared, bomb / blast x set to -1) is taken back afterwards.
+func _write_shots() -> void:
+	_mirrored.clear()
+	if not syms.has("shot_list"):
+		return
+	var base := int(syms["shot_list"])
+	var n := 0
+	for sh in g.shots_for_vm():
+		if n >= MIRROR_SLOTS:
+			break
+		var a := base + n * 16
+		cpu.w16(a, (0x4000 | clampi(sh.dmg, 1, 255)) if sh.special else 1)
+		cpu.w16(a + 2, sh.x)
+		cpu.w16(a + 4, sh.y)
+		_mirrored.append(sh)
+		n += 1
+	cpu.w16(base + n * 16, 0xFFFF)
+	if syms.has("bomb_x"):
+		cpu.w16(int(syms["bomb_x"]), g.bomb_pos().x & 0xFFFF)
+		cpu.w16(int(syms["bomb_y"]), g.bomb_pos().y & 0xFFFF)
+	if syms.has("blast_x"):
+		cpu.w16(int(syms["blast_x"]), g.blast_pos().x & 0xFFFF)
+		cpu.w16(int(syms["blast_y"]), g.blast_pos().y & 0xFFFF)
+
+
+func _read_shots() -> void:
+	if not syms.has("shot_list"):
+		return
+	var base := int(syms["shot_list"])
+	for i in _mirrored.size():
+		if cpu.r16(base + i * 16) == 0:
+			g.consume_shot(_mirrored[i])
+	if syms.has("bomb_x") and _s16(cpu.r16(int(syms["bomb_x"]))) < 0:
+		g.consume_bomb()
+	if syms.has("blast_x") and _s16(cpu.r16(int(syms["blast_x"]))) < 0:
+		g.consume_blast()
+
+
+## Level 4: the last guardian routine sets a flag when the level is over.
+func level_done() -> bool:
+	return ok and syms.has("end_flag") and cpu.r16(int(syms["end_flag"])) == 1
 
 
 ## What the original's section routine ($99BE and friends) puts back in the engine variables when the next
@@ -274,10 +324,21 @@ func run_scene(owner: Enemy) -> void:
 	owner.vm_draws.clear()
 	owner.vm_blits.clear()
 	var ran := false
+	# the pointers the main loop calls, and (level 4) the routines of the last guardian once the counter passed
+	# its column
+	var targets: Array = []
 	for key in ["scene_a", "scene_b"]:
-		if not syms.has(key):
-			continue
-		var target := cpu.r32(int(syms[key])) & 0xFFFFFF
+		if syms.has(key):
+			targets.append([cpu.r32(int(syms[key])) & 0xFFFFFF, int(syms[key])])
+	if syms.has("final_calls") and g.col_counter() >= int(syms["final_col"]):
+		for addr in syms["final_calls"]:
+			targets.append([int(addr), -1])
+	if syms.has("late_calls"):
+		for addr in syms["late_calls"]:
+			targets.append([int(addr), -1])
+	for tg in targets:
+		var target: int = tg[0]
+		var key_addr: int = tg[1]
 		if target < LevelDefs.RAM_BASE or target >= LevelDefs.RAM_BASE + level.raw.size():
 			continue
 		ran = true
@@ -285,16 +346,19 @@ func run_scene(owner: Enemy) -> void:
 		_pending.clear()
 		_bullet_for_scratch = {}
 		_set_globals()
+		_write_shots()
 		for i in 8:
 			cpu.d[i] = 0
 		cpu.a[5] = 0xDFF000
 		cpu.a[6] = draw_base
 		cpu.a[7] = STACK_TOP
 		cpu.call_hooked(target, hooks, stops)
+		_read_shots()
 		if cpu.failed:
 			push_warning("scene routine failed at %X (routine %X): %s" % [cpu.pc, target, cpu.last_error])
 			cpu.failed = false
-			cpu.w32(int(syms[key]), 0)
+			if key_addr >= 0:
+				cpu.w32(key_addr, 0)
 			continue
 		var draw_end := int(cpu.a[6])
 		_apply_scratch_bullet()

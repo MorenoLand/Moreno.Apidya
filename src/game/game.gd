@@ -277,7 +277,15 @@ func _physics_process(_delta: float) -> void:
 		_spawn_wave(_col)
 	var maxscroll := float(_level.cols * 16 - VIEW_W)
 	var end_col := int(LevelDefs.LEVELS[_level_no].get("end_col", 0))
-	if scroll >= maxscroll or (end_col > 0 and _col >= end_col):
+	var flag_end := _vm != null and _vm.ok and _vm.syms.has("end_flag")
+	if flag_end:
+		# the last guardian's routines run on the final screen and decide when the level is over; the
+		# picture goes two columns past the map (the original's counter gets there)
+		maxscroll += 32.0
+		scroll = minf(scroll, maxscroll)
+		if _vm.level_done():
+			_finish("LEVEL COMPLETE")
+	elif scroll >= maxscroll or (end_col > 0 and _col >= end_col):
 		scroll = minf(scroll, maxscroll)
 		_finish("LEVEL COMPLETE")
 	for i in _bg_chunks.size():
@@ -362,7 +370,14 @@ func _end_phase() -> void:
 	_col_override = -1
 	if _vm != null:
 		_vm.section_reset()
-	jump_to_col(mini(base + 40, _level.cols - 21 + _col_start))
+	# the original picks the restart column from its table (the last one not above counter + 40) and
+	# draws the screen's worth of columns, so the counter ends up at that column plus its starting value
+	var wanted := base + 40
+	var restart := 0
+	for c in _level.checkpoints:
+		if c <= wanted:
+			restart = c
+	jump_to_col(restart + _col_start)
 	_music_check(true)
 
 
@@ -398,6 +413,30 @@ var _scene := Enemy.new()       # owner of the sprites drawn by the scene routin
 
 ## Hit tests used by handlers that do their own collision (see HandlerVM): damage of the player's
 ## shots / blast inside a box, 0 when there is none.
+func shots_for_vm() -> Array:
+	return _weapons.shots
+
+
+func bomb_pos() -> Vector2i:
+	return Vector2i(_weapons.bomb_x, _weapons.bomb_y)
+
+
+func blast_pos() -> Vector2i:
+	return Vector2i(_weapons.blast_x, _weapons.blast_y)
+
+
+func consume_shot(s: Weapons.Shot) -> void:
+	_weapons.consume(s)
+
+
+func consume_bomb() -> void:
+	_weapons.bomb_x = -1
+
+
+func consume_blast() -> void:
+	_weapons.consume_blast()
+
+
 func shots_in_box(x0: int, y0: int, x1: int, y1: int) -> int:
 	return _weapons.test_shots_box(x0, y0, x1, y1)
 
@@ -746,6 +785,7 @@ func _update_player() -> void:
 				_fire_t = 2
 	_weapons.hold_fire(held, px, py)
 	_fire_was_down = held
+	_wall_collide()
 
 	# power-up meter: second button, or by itself in "auto" mode
 	var xtra := Input.is_action_pressed("xtra")
@@ -997,6 +1037,28 @@ func _collide() -> void:
 			_bullets.erase(bl)
 			_player_hit()
 			return
+
+
+## Touching a solid tile of the map ($1AA2): the point (px + 1 + scroll phase, py + 16) in the original's
+## buffer coordinates, i.e. world x = scroll + px + 1. With the shield every tick in the wall costs a shield
+## hit and the ship is lost when they run out, without it it is lost at once.
+func _wall_collide() -> void:
+	if _dead_t > 0 or _invuln > 0:
+		return
+	if not _weapons.solid_world(int(scroll) + px + 1, py + 0x10):
+		return
+	if _ps.shield:
+		_ps.shield_hits -= 1
+		if _ps.shield_hits >= 0:
+			return
+		_ps.shield = false
+	_ps.shield_hits = 0
+	_audio.sfx(SFX_PLAYER_DIE)
+	_lives -= 1
+	_dead_t = 60
+	_player_spr.visible = false
+	_ps.reset_for_life()
+	_update_hud()
 
 
 func _player_hit() -> void:

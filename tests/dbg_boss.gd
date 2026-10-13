@@ -7,11 +7,14 @@ func _initialize() -> void:
 	var chase := false
 	var dump_a := 0
 	var dump_n := 0
+	var aim_y := 0
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--level="): level = int(a.substr(8))
 		elif a.begins_with("--col="): col = int(a.substr(6))
 		elif a.begins_with("--ticks="): ticks = int(a.substr(8))
 		elif a == "--chase": chase = true
+		elif a.begins_with("--aim="):
+			aim_y = a.substr(6).hex_to_int()
 		elif a.begins_with("--dump="):
 			var parts := a.substr(7).split(",")
 			dump_a = parts[0].hex_to_int()
@@ -26,6 +29,8 @@ func _initialize() -> void:
 	for t in ticks:
 		g._invuln = 100
 		g.py = 20 + (t / 40) % 180
+		if aim_y != 0:
+			g.py = clampi(g._vm.cpu.r16(aim_y) - 5, 3, 212)
 		if chase:
 			var best: Enemy = null
 			for e in g._enemies:

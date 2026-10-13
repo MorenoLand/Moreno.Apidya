@@ -20,7 +20,8 @@ const TABLE := {
 		"heavy_frame": 0x7C6D, "loop_end": 0x40E6, "death": 0x4114, "head": 0x7B98, "vel_shift": 0x9,
 		"rec_size": 0x20, "aim_guard": 0x1, "aim_scale": 0x1, "draw_base": 0x7E20C, "draw_main": 0x22EE,
 		"draw_list": 0x22F4, "scene_a": 0x7B54, "scene_b": 0x7B58, "col_counter": 0x7BAA,
-		"enemy_slots": 20,
+		"shot_list": 0x7DD90, "bomb_x": 0x7C6E, "bomb_y": 0x7C70, "blast_x": 0x7C4A, "blast_y": 0x7C4C,
+		"blast_power": 0x7C48, "enemy_slots": 20,
 	},
 	2: {
 		"fire_dir": 0x5C84, "fire_vel": 0x5D32, "fire_aimed": 0x5CC0, "ball": 0x46D2, "heavy": 0x4724,
@@ -30,7 +31,8 @@ const TABLE := {
 		"heavy_frame": 0x7B29, "loop_end": 0x4398, "death": 0x43C6, "head": 0x7A56, "vel_shift": 0x7,
 		"rec_size": 0x20, "aim_guard": 0x0, "aim_scale": 0x1, "draw_base": 0x7E648, "draw_main": 0x24D0,
 		"draw_list": 0x24D6, "scene_a": 0x7A12, "scene_b": 0x7A16, "col_counter": 0x7A68,
-		"enemy_slots": 20,
+		"late_calls": [0x5910], "shot_list": 0x7E190, "bomb_x": 0x7B2A, "bomb_y": 0x7B2C,
+		"blast_x": 0x7B06, "blast_y": 0x7B08, "blast_power": 0x7B04, "enemy_slots": 20,
 	},
 	3: {
 		"fire_dir": 0x5F04, "fire_vel": 0x5FC4, "fire_aimed": 0x5F40, "ball": 0x45E4, "heavy": 0x4636,
@@ -40,7 +42,9 @@ const TABLE := {
 		"heavy_frame": 0x7F95, "loop_end": 0x4292, "death": 0x42C0, "head": 0x7EBE, "vel_shift": 0x9,
 		"rec_size": 0x20, "aim_guard": 0x1, "aim_scale": 0x1, "draw_base": 0x7E198, "draw_main": 0x2320,
 		"draw_list": 0x2326, "hit_shots": 0x5BC8, "hit_bomb": 0x5C1E, "hit_blast": 0x5C78,
-		"scene_a": 0x7E66, "scene_b": 0x7E6A, "col_counter": 0x7ED0, "enemy_slots": 20,
+		"scene_a": 0x7E66, "scene_b": 0x7E6A, "col_counter": 0x7ED0, "shot_list": 0x7DC90,
+		"bomb_x": 0x7F96, "bomb_y": 0x7F98, "blast_x": 0x7F72, "blast_y": 0x7F74, "blast_power": 0x7F70,
+		"enemy_slots": 20,
 	},
 	4: {
 		"fire_dir": 0x5AA6, "fire_vel": 0x5B54, "fire_aimed": 0x5AE2, "ball": 0x455A, "heavy": 0x45B2,
@@ -50,7 +54,10 @@ const TABLE := {
 		"heavy_frame": 0x7E47, "loop_end": 0x3DC6, "death": 0x3DF8, "head": 0x7D6E, "vel_shift": 0x9,
 		"rec_size": 0x26, "hp_mask": 0x3F, "aim_guard": 0x0, "aim_scale": 0x0, "draw_base": 0x7E420,
 		"draw_main": 0x21CE, "draw_list": 0x21D4, "scene_a": 0x7D2C, "scene_b": 0x7D30,
-		"col_counter": 0x7D80, "enemy_slots": 20,
+		"col_counter": 0x7D80, "final_col": 0x1C7,
+		"final_calls": [0xBE60, 0xB7FA, 0xAF60, 0xB924, 0xBF24], "shot_list": 0x7DF90,
+		"end_flag": 0xC170, "bomb_x": 0x7E48, "bomb_y": 0x7E4A, "blast_x": 0x7E24, "blast_y": 0x7E26,
+		"blast_power": 0x7E22, "enemy_slots": 20,
 	},
 	5: {
 		"fire_dir": 0x6952, "fire_vel": 0x6A00, "fire_aimed": 0x698E, "ball": 0x4726, "heavy": 0x4780,
@@ -60,7 +67,8 @@ const TABLE := {
 		"heavy_frame": 0x7B91, "loop_end": 0x406A, "death": 0x409C, "head": 0x7ABA, "vel_shift": 0x9,
 		"rec_size": 0x26, "hp_mask": 0x3F, "aim_guard": 0x0, "aim_scale": 0x0, "draw_base": 0x7E620,
 		"draw_main": 0x2472, "draw_list": 0x2478, "scene_a": 0x7A78, "lock_byte": 0x1,
-		"col_freeze": 0x7ACF, "col_counter": 0x7ACC, "enemy_slots": 20,
+		"col_freeze": 0x7ACF, "col_counter": 0x7ACC, "shot_list": 0x7E190, "bomb_x": 0x7B92,
+		"bomb_y": 0x7B94, "blast_x": 0x7B6E, "blast_y": 0x7B70, "blast_power": 0x7B6C, "enemy_slots": 20,
 	},
 }
 

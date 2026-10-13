@@ -22,6 +22,7 @@ var shot_art := {}                        # player shot / pod / enemy bullet ima
 var set_pieces: Array = []                # type 5 objects: {img, alt} opaque playfield blits
 var image_cache := {}
 var raw: PackedByteArray                  # unpacked level file (RAM base $0A00)
+var checkpoints := PackedInt32Array()      # restart columns: after a guardian the level goes on at the one at or below
 var type8_pieces: Array = []             # level 5 type 8 objects: {img, w, h, xoff, yoff, hit_w, hit_h}
 var bomb_frames: Array = []              # bomb / crawler sprite frames {h, yoff, px: PackedByteArray of 0..3, 16 wide}
 var rec_const10 := 0x6D6A                 # the word the spawner stores at +$10 of every enemy record
@@ -46,6 +47,7 @@ static func load_level(disks: DiskSet, level_no: int) -> LevelData:
 	d._find_record_constant()
 	d._load_bomb_frames()
 	d._load_type8_pieces()
+	d._load_checkpoints()
 	return d
 
 
@@ -76,6 +78,29 @@ func _load_bomb_frames() -> void:
 						var bit := 15 - x
 						px[r * 16 + x] = ((a >> bit) & 1) | (((b >> bit) & 1) << 1)
 				bomb_frames.append({"h": h, "yoff": yoff, "px": px})
+			return
+
+
+## The routine that restarts the level after a guardian looks the column up in a table of restart
+## columns (`lea (t).l,A0 ; cmp.w (A0),D0 ; beq ; cmp.w (2,A0),D0 ; blt ; lea (2,A0),A0 ; bra`), ended by $7FFF.
+func _load_checkpoints() -> void:
+	var lim := mini(raw.size() - 24, 0x9800)
+	for i in range(0, lim):
+		if raw[i] == 0x41 and raw[i + 1] == 0xF9 and raw[i + 6] == 0xB0 and raw[i + 7] == 0x50:
+			var j := i + 8
+			var found := false
+			for k in range(j, j + 10):
+				if raw[k] == 0xB0 and raw[k + 1] == 0x68 and raw[k + 2] == 0x00 and raw[k + 3] == 0x02:
+					found = true
+					break
+			if not found:
+				continue
+			var t := BE.u32(raw, i + 2)
+			for n in 24:
+				var v := BE.u16(raw, _off(t) + n * 2)
+				if v == 0x7FFF:
+					break
+				checkpoints.append(v)
 			return
 
 

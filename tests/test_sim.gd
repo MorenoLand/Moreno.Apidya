@@ -25,6 +25,7 @@ func _initialize() -> void:
 	var god := false
 	var chase := false
 	var maxed := false
+	var start_col := -1
 	for a in OS.get_cmdline_user_args():
 		if a == "--god":
 			god = true
@@ -32,6 +33,10 @@ func _initialize() -> void:
 			chase = true
 		elif a == "--max":
 			maxed = true
+		elif a.begins_with("--col="):
+			start_col = int(a.substr(6))
+	if start_col >= 0:
+		g.jump_to_col(start_col)
 	if maxed:
 		g._ps.weapon = 3
 		g._ps.w1 = 2
@@ -57,7 +62,9 @@ func _initialize() -> void:
 			for e in g._enemies:
 				if e.dead or e.x < g.px or e.x > 330 or e.hit_h <= 0:
 					continue
-				if target == null or e.x < target.x:
+				if e.y > 235 or e.hit_w * e.hit_h < 100:
+					continue
+				if target == null or e.hit_w * e.hit_h > target.hit_w * target.hit_h:
 					target = e
 			if target != null:
 				var ty := int(target.y) + target.hit_h / 2 - 8 + (t / 6) % 15 - 7

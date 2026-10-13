@@ -17,7 +17,7 @@ func _initialize() -> void:
 		else:
 			singles += 1
 	print("groups %d singles %d" % [groups, singles])
-	for i in mini(lv.waves.size(), 60):
+	for i in lv.waves.size():
 		var w: Dictionary = lv.waves[i]
 		if w["group"]:
 			var f := lv.decode_formation(w["list"])
