@@ -6,6 +6,7 @@ extends Control
 
 signal exited
 signal level_complete(carry: Dictionary)    # the ship has left the screen; `carry` goes to the next level
+signal game_over(score: int)                # the last ship is gone
 
 const VIEW_W := 320
 const BG_CHUNK := 4096
@@ -551,9 +552,9 @@ func _update_end() -> void:
 		return
 	_end_t += 1
 	if not _complete:
-		if _end_t > 220:
+		if _end_t > 150:
 			_end_sent = true
-			exited.emit()
+			game_over.emit(_score)
 		return
 	if _end_t == 1:
 		for e in _enemies:

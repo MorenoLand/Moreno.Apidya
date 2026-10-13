@@ -8,6 +8,8 @@ var _dialog: FileDialog
 var _front: FrontEnd
 var _game: Game
 var _ending: Ending
+var _screen: MessageScreen
+var _credits := 3               # continues left ($9C2: the front end starts every game with three)
 var _options := {}
 var _level_no := 1
 
@@ -82,6 +84,7 @@ func _open_front_end(result: Dictionary = {}) -> void:
 
 func _on_start_game(options: Dictionary) -> void:
 	_options = options
+	_credits = 3
 	if _front:
 		_front.queue_free()
 		_front = null
@@ -94,6 +97,7 @@ func _begin_level(level: int) -> void:
 	_game.setup(_disks, level, _options)
 	_game.exited.connect(_on_game_exited)
 	_game.level_complete.connect(_on_level_complete)
+	_game.game_over.connect(_on_game_over)
 	add_child(_game)
 
 
@@ -110,7 +114,8 @@ func _on_level_complete(carry: Dictionary) -> void:
 		if diff == 0:
 			_open_front_end({"score": score, "difficulty": diff})
 		else:
-			_begin_ending(2, score)
+			# $4C340 with D0 = 1: the notice, then the ending program with its third argument
+			_show_screen("GAME OVER. TRY NORMAL LEVEL.", false, func(_r: int) -> void: _begin_ending(2, score))
 		return
 	if _level_no >= 5:
 		_begin_ending(1 if diff == 3 else 0, score)
@@ -128,6 +133,36 @@ func _begin_ending(mode: int, score: int) -> void:
 			_ending = null
 		_open_front_end({"score": score, "difficulty": _options.get("difficulty", 2)}))
 	add_child(_ending)
+
+
+## The last ship is lost: the original asks whether to continue (a credit buys the level again with three ships).
+func _on_game_over(score: int) -> void:
+	if _game:
+		_game.queue_free()
+		_game = null
+	var diff = _options.get("difficulty", 2)
+	if _credits <= 0:
+		_open_front_end({"score": score, "difficulty": diff})
+		return
+	_show_screen("CONTINUE", true, func(r: int) -> void:
+		if r == 1:
+			_credits -= 1
+			_options["lives"] = 3
+			_options.erase("carry")
+			_begin_level(_level_no)
+		else:
+			_open_front_end({"score": score, "difficulty": diff}))
+
+
+func _show_screen(lines: String, choice: bool, then: Callable) -> void:
+	_screen = MessageScreen.new()
+	_screen.setup(lines, choice, _credits)
+	_screen.done.connect(func(r: int) -> void:
+		if _screen:
+			_screen.queue_free()
+			_screen = null
+		then.call(r))
+	add_child(_screen)
 
 
 func _on_game_exited() -> void:
