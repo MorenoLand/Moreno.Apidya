@@ -30,9 +30,33 @@ func pickup() -> void:
 		bar = 1
 
 
+## The ship is lost ($9790): the meter highlight goes and every upgrade drops one step. The current weapon
+## loses a level (the missile and wave families fall back to the spread weapon from their lowest level),
+## speed goes down to 2, two pods become one and one becomes none, the same for the bomb.
 func reset_for_life() -> void:
-	# the original keeps the upgrades when a life is lost; only the meter highlight is reset
 	bar = 0
+	if weapon == 3:
+		if w3 > 0:
+			w3 -= 1
+		else:
+			weapon = 1
+	elif weapon == 2:
+		if w2 > 0:
+			w2 -= 1
+		else:
+			weapon = 1
+	elif w1 > 0:
+		w1 -= 1
+	if speed > MIN_SPEED:
+		speed -= 1
+	if pods < 0:
+		pods = 1
+	elif pods > 0:
+		pods = 0
+	if bomb < 0:
+		bomb = 1
+	elif bomb > 0:
+		bomb = 0
 
 
 ## Spends the highlighted slot ($16F8). Returns NONE / USED / DENIED.
