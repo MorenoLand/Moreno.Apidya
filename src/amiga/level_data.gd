@@ -22,6 +22,8 @@ var shot_art := {}                        # player shot / pod / enemy bullet ima
 var set_pieces: Array = []                # type 5 objects: {img, alt} opaque playfield blits
 var image_cache := {}
 var raw: PackedByteArray                  # unpacked level file (RAM base $0A00)
+var bomb_frames: Array = []              # bomb / crawler sprite frames {h, yoff, px: PackedByteArray of 0..3, 16 wide}
+var rec_const10 := 0x6D6A                 # the word the spawner stores at +$10 of every enemy record
 
 
 static func load_level(disks: DiskSet, level_no: int) -> LevelData:
@@ -40,7 +42,50 @@ static func load_level(disks: DiskSet, level_no: int) -> LevelData:
 	d.item_img = d._planar_masked(def["item_gfx"], def["item_mask"], 1, 15, d.planes)
 	d._load_shot_art(def)
 	d._load_set_pieces()
+	d._find_record_constant()
+	d._load_bomb_frames()
 	return d
+
+
+## The bomb is a hardware sprite that cycles through six frames. The frame table is found through the
+## code that copies its entries into the variables (`lea (t,PC),A0 ; move.w (0,A0,D0),(v).w ;
+## move.w (2,A0,D0),(v).w ; move.w ($18,A0,D0),(v).w ; move.w ($1A,A0,D0),(v).w`). An entry is the
+## address of the sprite data (4 byte header, rows of two bit plane words) and its height; the second
+## half of the table holds the vertical offset of each frame.
+func _load_bomb_frames() -> void:
+	var lim := mini(raw.size() - 22, 0x9000)
+	for i in range(0, lim):
+		if raw[i] == 0x41 and raw[i + 1] == 0xFA and raw[i + 4] == 0x31 and raw[i + 5] == 0xF0 \
+				and raw[i + 6] == 0x00 and raw[i + 7] == 0x00 and raw[i + 10] == 0x31 and raw[i + 11] == 0xF0 \
+				and raw[i + 12] == 0x00 and raw[i + 13] == 0x02 and raw[i + 16] == 0x31 and raw[i + 17] == 0xF0 \
+				and raw[i + 18] == 0x00 and raw[i + 19] == 0x18:
+			var table := LevelDefs.RAM_BASE + i + 2 + BE.s16(raw, i + 2)
+			for f in 6:
+				var ptr := BE.u16(raw, _off(table) + f * 4)
+				var h := BE.u16(raw, _off(table) + f * 4 + 2)
+				var yoff := BE.s16(raw, _off(table) + 0x18 + f * 4)
+				var px := PackedByteArray()
+				px.resize(16 * h)
+				for r in h:
+					var o := _off(ptr) + 4 + r * 4
+					var a := BE.u16(raw, o)
+					var b := BE.u16(raw, o + 2)
+					for x in 16:
+						var bit := 15 - x
+						px[r * 16 + x] = ((a >> bit) & 1) | (((b >> bit) & 1) << 1)
+				bomb_frames.append({"h": h, "yoff": yoff, "px": px})
+			return
+
+
+## The spawner copies a formation entry into an enemy record and stores a per level constant at +$10
+## (`move.w #k,($10,A1) ; move.w #$101,($12,A1)`).
+func _find_record_constant() -> void:
+	for i in range(0, mini(raw.size() - 12, 0x8000)):
+		if raw[i] == 0x33 and raw[i + 1] == 0x7C and raw[i + 4] == 0x00 and raw[i + 5] == 0x10 \
+				and raw[i + 6] == 0x33 and raw[i + 7] == 0x7C and raw[i + 8] == 0x01 and raw[i + 9] == 0x01 \
+				and raw[i + 10] == 0x00 and raw[i + 11] == 0x12:
+			rec_const10 = (raw[i + 2] << 8) | raw[i + 3]
+			return
 
 
 func _off(ram_addr: int) -> int:
@@ -291,6 +336,22 @@ func _opaque_interleaved(gfx_ram: int, w_words: int, rows: int) -> Image:
 				buf[p + 1] = 255
 				p += 2
 	return Image.create_from_data(w_words * 16, rows, false, Image.FORMAT_LA8, buf)
+
+
+## Opaque straight copy image (set pieces and handler blits), cached by address.
+func opaque_image(gfx: int, w_words: int, rows: int) -> Image:
+	var k := "o%x_%d_%d" % [gfx, w_words, rows]
+	if not image_cache.has(k):
+		image_cache[k] = _opaque_interleaved(gfx, w_words, rows)
+	return image_cache[k]
+
+
+## Shot-style sprite (rows * planes words per column, mask duplicated per plane) cached by address.
+func interleaved_image(gfx: int, mask: int, w_words: int, rows: int) -> Image:
+	var k := "i%x_%x_%d_%d" % [gfx, mask, w_words, rows]
+	if not image_cache.has(k):
+		image_cache[k] = _interleaved_masked(gfx, mask, w_words, rows)
+	return image_cache[k]
 
 
 func read_u8(ram_addr: int) -> int:

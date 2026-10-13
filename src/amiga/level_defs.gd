@@ -9,7 +9,7 @@ const LEVELS := {
 	1: {"name": "Garden", "file": 2, "tiles": 0xC752, "planes": 5, "map": 0x1BD38, "cols": 460, "pal": 0x900A,
 		"bobs": 0x750E, "bob_count": 73, "player": 0x89D4, "player_gfx": 0x1F320,
 		"waves": 0x7CB0, "copper": 0x8348, "angle": 0x8858,
-		"shots": 0x8F40, "ball_script": 0x6B96, "phase": 0x8820,
+		"shots": 0x8F40, "ball_script": 0x6B96, "music_cols": [0xAC, 0x130], "phase": 0x8820,
 		"item_gfx": 0x21080, "item_mask": 0x25062},
 	2: {"name": "Pond", "file": 11, "tiles": 0xC8CC, "planes": 5, "map": 0x1DD98, "cols": 460, "pal": 0xA2BA,
 		"bobs": 0x749E, "bob_count": 74, "player": 0x9C14, "player_gfx": 0x21380,

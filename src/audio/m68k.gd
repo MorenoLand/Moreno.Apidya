@@ -26,6 +26,8 @@ var fc := 0
 var fs := 1
 var io: Object = null
 var instr_count := 0
+var call_log: Dictionary = {}     # optional: target address -> count of JSR / BSR
+var trace_calls := false
 var failed := false
 var last_error := ""
 
@@ -336,6 +338,34 @@ func call_sub(addr: int, max_instr: int = 300000, as_interrupt: bool = false) ->
 	instr_count += n
 
 
+## Runs a subroutine like call_sub, but calls `hooks[pc]` (func(cpu: M68K)) instead of executing the
+## code at those addresses (the hook must perform the RTS itself with rts()), and returns early when
+## the PC reaches one of `stops`. Returns the address it stopped at (SENTINEL = normal return).
+func call_hooked(addr: int, hooks: Dictionary, stops: Dictionary, max_instr: int = 20000) -> int:
+	if failed:
+		return SENTINEL
+	_push32(SENTINEL)
+	pc = addr
+	var n := 0
+	while pc != SENTINEL and not failed:
+		if hooks.has(pc):
+			hooks[pc].call(self)
+			continue
+		if stops.has(pc):
+			break
+		step()
+		n += 1
+		if n > max_instr:
+			_fail("instruction budget exceeded in hooked call")
+			break
+	instr_count += n
+	return pc
+
+
+func rts() -> void:
+	pc = _pop32()
+
+
 func step() -> void:
 	var op := fetch16()
 	match op >> 12:
@@ -595,6 +625,8 @@ func _op4(op: int) -> void:
 		_ea(mode, reg, 2)
 		_push32(pc)
 		pc = _v
+		if trace_calls:
+			call_log[pc] = call_log.get(pc, 0) + 1
 		return
 	if (op & 0xFFC0) == 0x4EC0:                                  # JMP
 		_ea(mode, reg, 2)
@@ -716,6 +748,8 @@ func _op6(op: int) -> void:
 	if cc == 1:
 		_push32(pc)
 		pc = (base + disp) & 0xFFFFFFFF
+		if trace_calls:
+			call_log[pc] = call_log.get(pc, 0) + 1
 	elif cond(cc):
 		pc = (base + disp) & 0xFFFFFFFF
 

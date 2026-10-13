@@ -26,7 +26,8 @@ var phase := 0               # extra frame offset (the original's D6)
 var level: LevelData
 var handler_addr := 0
 var handler := Callable()
-var rec := PackedByteArray() # original record bytes, indexed by original offset (0..0x1F)
+var rec := PackedByteArray() # original record bytes, indexed by original offset (0..0x25)
+var hp_bits := 0             # bits of the hit point byte that are neither hit points nor the flash flag (levels 4, 5)
 var set_piece := false       # type 5: opaque image blitted into the playfield
 var pix_x := 0               # type 5 position in the playfield (pixels, world x without scroll)
 var pix_y := 0
@@ -39,6 +40,11 @@ var dying := false           # hit points ran out; a death sequence / the handle
 var owns_death := false      # the handler runs the death sequence itself
 var on_death := Callable()   # called when the enemy was destroyed: func(g: Game, e: Enemy)
 var fixed_hitbox := false
+var vm_slot := -1            # >= 0: the original handler code runs this enemy (HandlerVM)
+var vm_draws: Array = []     # sprites the handler asked for this tick
+var vm_blits: Array = []     # blitter copies the handler did this tick
+var vm_freed := false
+var flash_bit := false       # bit 7 of the hit point byte
 var _death_ptr := 0
 var _death_t := 1
 
@@ -61,6 +67,17 @@ var _ptimer := 0
 var _code := 0
 
 
+## Record as the spawner leaves it: levels 4 and 5 keep six more bytes (a second playfield offset
+## word and two position words) behind the 32 common ones.
+func _init_record(const10: int) -> void:
+	rec.resize(0x26)
+	rec[0x20] = 0xFF
+	rec[0x21] = 0xFF
+	rec[0x22] = 0x80
+	rec[0x24] = 0x80
+	set_rw(0x10, const10)
+
+
 func init_from_wave(w: Dictionary, lv: LevelData, scroll: float, group_slot: int = -1) -> void:
 	level = lv
 	type = w["type"]
@@ -73,11 +90,10 @@ func init_from_wave(w: Dictionary, lv: LevelData, scroll: float, group_slot: int
 	score = _bcd(w["score_bcd"])
 	world_x = x - 14.0 + scroll
 	spawn_scroll = scroll
-	rec.resize(0x20)
+	_init_record(lv.rec_const10)
 	rec[0x0C] = w["fire_timer"]
 	rec[0x0D] = w["fire_reload"]
 	set_rw(0x0E, w["script"])
-	set_rw(0x10, 0x6D6A)
 	set_rw(0x12, 0x101)
 	set_rw(0x14, w["p6"])
 	set_rw(0x16, w["p7"])
@@ -86,6 +102,7 @@ func init_from_wave(w: Dictionary, lv: LevelData, scroll: float, group_slot: int
 	set_rw(0x1C, w["handler"])
 	set_rw(0x1E, w["p11"])
 	handler_addr = w["handler"]
+	_off0 = w["p11"]
 	match type:
 		2, 3:
 			set_path_script(w["script"])
@@ -200,6 +217,11 @@ func _next_entry() -> void:
 ## Applies damage; returns true when this destroyed the enemy.
 func hit(dmg: int) -> bool:
 	if dying or dead:
+		return false
+	if vm_slot >= 0:
+		# the handler's own code decides about death (it looks at the byte at +8 each tick)
+		hp = maxi(0, hp - dmg)
+		flash_bit = true
 		return false
 	hp -= dmg
 	flash = 4
@@ -366,8 +388,6 @@ var _off0 := 0
 ## Screen position (px) of a type 5 set piece: its playfield offset, as the handlers move it by
 ## changing +0x1E (one text line = 230 bytes, 8 pixels per byte).
 func set_piece_pos(g: Game) -> Vector2:
-	if _off0 == 0:
-		_off0 = rw(0x1E)
 	var delta := ((rw(0x1E) - _off0 + 32768) & 0xFFFF) - 32768
 	var lines := roundi(delta / 230.0)
 	var xb := delta - lines * 230

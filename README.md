@@ -50,8 +50,10 @@ Early but playable prototype.
 | Enemies | path followers, scroll-locked objects, polar movers, timed formations; shooting, hit points, score |
 | Power-ups | capsules drop when a formation is wiped out; the 8-slot meter (speed, bomb, spread / missile / wave weapons with their levels, option pods, shield, slow down) with the original's auto-use rules; all weapon shot types and the charge blast |
 | Audio | all music and sound effects, rendered by the game's own replay routine (see below) |
-| Level 1 handlers | the native-handler enemies of level 1 (shooters, cannons, plants, throwers, mini guardian, level guardian) ported from the original's routines |
-| Not yet | level 5, handlers of levels 2-5, exact explosion graphics, HUD graphics, story animations, ending |
+| Enemy handlers | the shooters, cannons, plants, throwers, mini guardians and level guardians of levels 1-4 are the original's own routines, run from the level file by the 68000 interpreter (see below) |
+| Power-ups | bombs (lobbed bomb and the two terrain crawlers) in addition to the weapons above |
+| Playable | levels 1-4 can be played from start to guardian and beyond |
+| Not yet | level 5, the scrolling boss room of level 4, exact explosion graphics, HUD graphics, story animations, ending |
 
 ## How it works
 
@@ -71,6 +73,12 @@ result, so songs and effects come straight from the original data with no pre-re
 font strip, texts, option tables, default high scores) and `FrontEnd` runs the screens with the original's
 colour-fade engine and option handlers. The option screen is two 1-bit text planes (green labels, blue
 alternatives, white selection), exactly like the original.
+
+`src/game/handler_vm.gd` runs the original's enemy handlers (the guardians and the other special enemies,
+which are small 68000 routines of the level file) in the same interpreter. Everything around them is
+native: the handler sees the enemy record, a handful of engine variables and the engine services it calls
+(bullets, explosions, sounds, music), which `VmSymbols` locates in each level file and the game answers
+itself. The draw records and blitter copies a handler produces are turned into sprites.
 
 `src/game/` is the new engine: a fixed 50 Hz loop that scrolls the map half a pixel per tick, spawns
 enemies from the wave table when their column scrolls in and moves them with the original path/polar

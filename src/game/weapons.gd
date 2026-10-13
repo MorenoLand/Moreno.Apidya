@@ -11,6 +11,7 @@ extends Node2D
 
 signal sound(effect: int)
 signal enemy_hit(enemy: Enemy, killed: bool)
+signal explosion(x: float, y: float)
 
 const X_OFFSET := 14
 const MAX_BASIC := 8
@@ -62,6 +63,24 @@ var _hist_y: Array[int] = []
 var _pod_sprites: Array[Sprite2D] = []
 var pod_pos: Array[Vector2i] = [Vector2i(-100, 0), Vector2i(-100, 0)]
 
+# bombs: variant 1 is lobbed ($3522), variant -1 are two crawlers that follow the terrain ($3758)
+const BOMB_FLIGHT := [[2, 1, 5], [4, 2, 4], [4, 3, 2], [3, 4, 1], [1, 0, 0]]   # ticks, dx, dy; the last first
+const CRAWL_DY := [-4, -2, 0, 2, 4]
+var bomb_x := -1                 # $7C6E, -1: not in flight
+var bomb_y := 0
+var _bomb_phase := 0
+var _bomb_t := 0
+var _bomb_dx := 0
+var _bomb_dy := 0
+var _bomb_latch := false         # $7C14: one bomb per press of the fire button
+var _bomb_anim := 5              # $7C7A
+var _bomb_anim_t := 0            # $7C7F
+var _bomb_spr: Sprite2D
+var _crawl_x: Array[int] = [-1, -1]
+var _crawl_y: Array[int] = [0, 0]
+var _crawl_s: Array[int] = [0, 4]
+var _crawl_spr: Array[Sprite2D] = []
+
 
 func setup(lv: LevelData, ps: PlayerState, mat: ShaderMaterial, fy: int) -> void:
 	level = lv
@@ -83,6 +102,18 @@ func setup(lv: LevelData, ps: PlayerState, mat: ShaderMaterial, fy: int) -> void
 	for i in 32:
 		_hist_x.append(0)
 		_hist_y.append(0)
+	_bomb_spr = Sprite2D.new()
+	_bomb_spr.centered = false
+	_bomb_spr.material = mat
+	_bomb_spr.visible = false
+	add_child(_bomb_spr)
+	for i in 2:
+		var c := Sprite2D.new()
+		c.centered = false
+		c.material = mat
+		c.visible = false
+		add_child(c)
+		_crawl_spr.append(c)
 
 
 func _texture(img: Image) -> ImageTexture:
@@ -193,12 +224,14 @@ func _volley_waves(px: int, py: int) -> int:
 ## Charge: holding fire counts down; releasing after the count reached zero lets the blast go.
 func hold_fire(held: bool, px: int, py: int) -> void:
 	if held:
+		_try_bomb(px, py)
 		if charge > 0:
 			charge -= 1
 		elif not charge_ready_played:
 			charge_ready_played = true
 			sound.emit(5)
 	else:
+		_bomb_latch = false
 		if charge == 0 and blast_x < 0:
 			blast_x = px + 0xA
 			blast_y = py + 0xA
@@ -234,6 +267,7 @@ func tick(px: int, py: int, scroll: float, enemies: Array[Enemy], moved: bool) -
 			keep.append(s)
 	shots = keep
 	_update_blast(enemies)
+	_update_bombs(scroll, enemies)
 
 
 func _remove(s: Shot) -> void:
@@ -384,6 +418,247 @@ func _enemy_test(s: Shot, enemies: Array[Enemy]) -> void:
 		enemy_hit.emit(e, e.hit(s.dmg))
 		sound.emit(9)
 		return
+
+
+# ---- collision tests of handlers that check the player's shots themselves --------------------------------
+## `$5BC8`: the first shot inside the box (record coordinates) is used up; returns its damage (0: none).
+func test_shots_box(x0: int, y0: int, x1: int, y1: int) -> int:
+	for s in shots:
+		if s.dead:
+			continue
+		if s.x < x0 or s.x > x1 or s.y < y0 or s.y > y1:
+			continue
+		var dmg := s.dmg if s.special else 1
+		_remove(s)
+		return dmg
+	return 0
+
+
+## `$5C78`: the charge blast inside the box is used up and does 15.
+func test_blast_box(x0: int, y0: int, x1: int, y1: int) -> int:
+	if blast_x < 0:
+		return 0
+	if blast_x + 5 < x0 or blast_x > x1:
+		return 0
+	var top := blast_y - 5
+	if top + 0x18 < y0 or top > y1:
+		return 0
+	blast_x = -1
+	_blast_sprite.visible = false
+	return 15
+
+
+# ---- bombs --------------------------------------------------------------------------------------------
+## A press of the fire button throws a bomb when none is in flight ($13EE..$1466).
+func _try_bomb(px: int, py: int) -> void:
+	if _bomb_latch or state.bomb == 0:
+		return
+	if bomb_x >= 0 or _crawl_x[0] >= 0 or _crawl_x[1] >= 0:
+		return
+	if state.bomb > 0:
+		bomb_x = px
+		bomb_y = py + 0xF
+		_bomb_phase = 4
+		_bomb_t = 1
+		_bomb_dx = 0
+		_bomb_dy = 0
+	else:
+		_crawl_x = [px - 8, px - 8]
+		_crawl_y = [py + 0xA, py + 0xA + 0xC]
+		_crawl_s = [0, 4]
+	_bomb_latch = true
+
+
+func _bomb_image(frame: int, colour_base: int) -> Image:
+	var key := "bomb%d_%d" % [frame, colour_base]
+	if _tex.has(key):
+		return _tex[key]
+	var f: Dictionary = level.bomb_frames[frame]
+	var img := Image.create(16, f["h"], false, Image.FORMAT_LA8)
+	var px: PackedByteArray = f["px"]
+	for y in int(f["h"]):
+		for x in 16:
+			var v: int = px[y * 16 + x]
+			img.set_pixel(x, y, Color8(colour_base + v, colour_base + v, colour_base + v, 255 if v != 0 else 0))
+	_tex[key] = img
+	return img
+
+
+func _tile(col: int, row: int) -> int:
+	if level.cols == 0 or col < 0 or col >= level.cols or row < 0 or row >= LevelData.ROWS:
+		return 0
+	return level.map_words[row * level.cols + col]
+
+
+func _signed8(v: int) -> int:
+	return v - 256 if v >= 128 else v
+
+
+## Damage a bomb does to the first enemy in its box: 2, and it is used up. Returns true when it hit.
+func _bomb_hits(enemies: Array[Enemy], left: int, top: int, right: int, bottom: int, ex: int, ey: int) -> bool:
+	for e in enemies:
+		if e.dead:
+			continue
+		if right < int(e.x) or bottom < int(e.y):
+			continue
+		if left > int(e.x) + _signed8(e.hit_w) or top > int(e.y) + _signed8(e.hit_h):
+			continue
+		if e.hp <= 0:
+			return true                            # nothing left to damage: the bomb vanishes
+		if e.hp <= 2:
+			enemy_hit.emit(e, e.hit(e.hp))
+			return true                            # kills it, no blast of its own
+		enemy_hit.emit(e, e.hit(2))
+		explosion.emit(float(ex), float(ey))
+		sound.emit(11)
+		return true
+	return false
+
+
+func _update_bombs(scroll: float, enemies: Array[Enemy]) -> void:
+	if level.bomb_frames.is_empty():
+		return
+	_bomb_anim_t -= 1
+	if _bomb_anim_t < 0:
+		_bomb_anim_t = 1
+		_bomb_anim -= 1
+		if _bomb_anim < 0:
+			_bomb_anim = 5
+	var fr: Dictionary = level.bomb_frames[_bomb_anim]
+	# lobbed bomb
+	if bomb_x >= 0:
+		_bomb_t = (_bomb_t - 1) & 0xFF
+		if _bomb_t == 0 and _bomb_phase >= 0:
+			var st: Array = BOMB_FLIGHT[_bomb_phase]
+			_bomb_t = st[0]
+			_bomb_dx = st[1]
+			_bomb_dy = st[2]
+			_bomb_phase -= 1
+		bomb_x += _bomb_dx
+		bomb_y += _bomb_dy
+		var gone := bomb_y >= 0xF0
+		if not gone:
+			gone = _bomb_hits(enemies, bomb_x + 0x10, bomb_y, bomb_x + 0x10 + 0x14, bomb_y + 0x10, bomb_x + 0x10, bomb_y)
+		if not gone and _solid_at(bomb_x, bomb_y + 0xA, scroll):
+			explosion.emit(float(bomb_x + 0x10), float(bomb_y))
+			sound.emit(11)
+			gone = true
+		if gone:
+			bomb_x = -1
+	if bomb_x >= 0:
+		_place(_bomb_spr, _bomb_image(_bomb_anim, 16), bomb_x + X_OFFSET, bomb_y + 4 + int(fr["yoff"]))
+	else:
+		_bomb_spr.visible = false
+	# crawlers
+	for i in 2:
+		if _crawl_x[i] < 0:
+			continue
+		_crawl_x[i] += 4
+		if _crawl_x[i] > 0x14E:
+			_crawl_x[i] = -1
+			continue
+		_crawl_y[i] += CRAWL_DY[_crawl_s[i]]
+		if _crawl_y[i] < 0 or _crawl_y[i] >= 0xF0:
+			_crawl_x[i] = -1
+			continue
+		_crawl_turn(i, scroll)
+		var cx := _crawl_x[i]
+		var cy := _crawl_y[i]
+		if _bomb_hits(enemies, cx, cy, cx + 0x10, cy + 0x10, cx + 0x10, cy):
+			_crawl_x[i] = -1
+			continue
+		_place(_crawl_spr[i], _bomb_image(_bomb_anim, 20), cx + X_OFFSET, cy + 4 + int(fr["yoff"]))
+	for i in 2:
+		if _crawl_x[i] < 0:
+			_crawl_spr[i].visible = false
+
+
+## Does the 8x8 quadrant of the playfield under the raw point (x, y) have its collision bit set?
+func _solid_at(x: int, y: int, scroll: float) -> bool:
+	var wx := x - X_OFFSET + int(scroll)
+	var w := _tile(wx >> 4, y >> 4) & 0x7800
+	if w == 0:
+		return false
+	var bit: int
+	if x & 8:
+		bit = 0x0800 if (y & 8) else 0x2000
+	else:
+		bit = 0x1000 if (y & 8) else 0x4000
+	return (w & bit) != 0
+
+
+## The state of a crawler (0..4 = vertical speed -4..4) follows the walls around it ($3812..$3916).
+func _crawl_turn(i: int, scroll: float) -> void:
+	var col := (_crawl_x[i] - X_OFFSET + int(scroll)) >> 4
+	var row := _crawl_y[i] >> 4
+	var mask := 0x1800 if (_crawl_y[i] & 8) else 0x6000
+	var s: int = _crawl_s[i]
+	var up_l := (_tile(col, row - 1) & mask) != 0
+	var up_m := (_tile(col + 1, row - 1) & mask) != 0
+	var mid_m := (_tile(col + 1, row) & mask) != 0
+	var mid_r := (_tile(col + 2, row) & mask) != 0
+	var dn_l := (_tile(col, row + 1) & mask) != 0
+	var dn_m := (_tile(col + 1, row + 1) & mask) != 0
+	var dn_r := (_tile(col + 2, row + 1) & mask) != 0
+	if i == 0:
+		match s:
+			0:
+				if up_l:
+					s += 1
+			1:
+				if not up_l:
+					s -= 1
+				elif up_m:
+					s += 1
+			2:
+				if not up_m:
+					s -= 1
+				elif mid_r:
+					s += 1
+			3:
+				if mid_m:
+					s += 1
+				elif not mid_r:
+					s -= 1
+			_:
+				if not mid_m:
+					s -= 1
+	else:
+		match s:
+			0:
+				if not dn_m:
+					s += 1
+			1:
+				if not dn_m:
+					s += 1
+				elif mid_r:
+					s -= 1
+			2:
+				if not dn_m:
+					s += 1
+				elif mid_m:
+					s -= 1
+			3:
+				if dn_r:
+					s -= 1
+				elif not dn_m:
+					s += 1
+			_:
+				if dn_l:
+					s -= 1
+	_crawl_s[i] = clampi(s, 0, 4)
+
+
+## `$5C1E`: the bomb inside the box of a boss part is used up (explodes) and does 2.
+func test_bomb_box(x0: int, y0: int, x1: int, y1: int) -> int:
+	if bomb_x < 0:
+		return 0
+	if bomb_x + 0x10 > x1 or bomb_x + 0x24 < x0 or bomb_y > y1 or bomb_y + 0x10 < y0:
+		return 0
+	explosion.emit(float(bomb_x + 0x10), float(bomb_y))
+	sound.emit(11)
+	bomb_x = -1
+	return 2
 
 
 # ---- charge blast ($1F80 / $56E6) -------------------------------------------------------------------

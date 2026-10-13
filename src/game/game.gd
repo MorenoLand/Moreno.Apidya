@@ -57,7 +57,8 @@ var _groups: Array = []                  # formation group slots (null or dictio
 var _items: Array[Dictionary] = []       # power-up capsules {x,y,spr}
 var _ps := PlayerState.new()
 var _weapons: Weapons
-var _tick := 0
+var _vm: HandlerVM
+var tick := 0
 
 # player state (raw coordinates)
 var px := 40
@@ -152,11 +153,13 @@ func _ready() -> void:
 	_player_spr.material = _mat
 	_world.add_child(_player_spr)
 
+	_vm = HandlerVM.new(self, _level, _level_no)
 	_weapons = Weapons.new()
 	_world.add_child(_weapons)
 	_weapons.setup(_level, _ps, _mat, FIELD_Y)
 	_weapons.sound.connect(_on_weapon_sound)
 	_weapons.enemy_hit.connect(_on_enemy_hit)
+	_weapons.explosion.connect(explode)
 
 	_hud = Label.new()
 	_hud.add_theme_font_size_override("font_size", 8)
@@ -249,9 +252,9 @@ func _update_hud() -> void:
 func _physics_process(_delta: float) -> void:
 	if _finished:
 		return
-	_tick += 1
-	Enemy.phase_a = [0, 1, 2, 1][_tick & 3]
-	Enemy.phase_b = [1, 2, 1, 0][_tick & 3]
+	tick += 1
+	Enemy.phase_a = [0, 1, 2, 1][tick & 3]
+	Enemy.phase_b = [1, 2, 1, 0][tick & 3]
 	if not scroll_locked:
 		scroll += SCROLL_STEP
 	var new_col := int(scroll) / 16
@@ -262,8 +265,11 @@ func _physics_process(_delta: float) -> void:
 	_bg.region_rect = Rect2(int(scroll), 0, VIEW_W, FIELD_H)
 	while new_col > _col:
 		_col += 1
-		_spawn_wave(_col)
+		if _phase_t == 0:
+			_spawn_wave(_col)
+		_music_check()
 
+	_check_phase()
 	_tick_groups()
 	_update_player()
 	_update_enemies()
@@ -276,6 +282,100 @@ func _physics_process(_delta: float) -> void:
 	_update_explosions()
 	_collide()
 	_update_hud()
+
+
+# ---- level sections: the guardians raise "phase events" ($7B50) -------------------------------------
+var _phase_t := 0
+var _phase_label: Label
+
+
+## A defeated guardian: fanfare, everything on screen explodes, a short bonus count, then the map
+## jumps 40 columns ahead (past the guardian's arena), like the original's $9134 routine.
+func _check_phase() -> void:
+	if phase_event != 0 and _phase_t == 0:
+		_phase_t = 300
+		scroll_locked = true
+		_audio.fade(0x30000)
+		for e in _enemies:
+			if e.dying or e.dead:
+				continue
+			if e.vm_slot >= 0:
+				e.hp = 0
+				e.flash_bit = false
+			else:
+				e.hit(1000)
+		for b in _bullets:
+			b["spr"].queue_free()
+		_bullets.clear()
+		if _phase_label == null:
+			_phase_label = Label.new()
+			_phase_label.add_theme_font_size_override("font_size", 10)
+			_phase_label.position = Vector2(100, 100)
+			_vp.add_child(_phase_label)
+		_phase_label.text = "SECTION CLEAR"
+		_phase_label.visible = true
+	if _phase_t > 0:
+		_phase_t -= 1
+		if _phase_t > 200 and (tick & 1) == 0:
+			_score += 10
+		if _phase_t == 0:
+			_end_phase()
+
+
+func _end_phase() -> void:
+	phase_event = 0
+	_phase_label.visible = false
+	scroll_locked = false
+	jump_to_col(mini(_col + 40, _level.cols - 21))
+	_music_check(true)
+
+
+## Moves the level to a map column; the waves of the columns in between are skipped.
+func jump_to_col(target: int) -> void:
+	scroll = float(target * 16)
+	_col = target
+	var waves := _level.waves
+	while _wave_idx < waves.size() and (waves[_wave_idx]["col"] <= target):
+		_wave_idx += 1
+	_groups.clear()
+
+
+## The level music has several parts that follow the map position ($98F2).
+func _music_check(force: bool = false) -> void:
+	var cols: Array = LevelDefs.LEVELS[_level_no].get("music_cols", [])
+	if cols.is_empty():
+		return
+	var part := 0
+	for c in cols:
+		if _col >= int(c):
+			part += 1
+	if part != _music_part or force:
+		_music_part = part
+		_audio.song([0, 4, 5][mini(part, 2)])
+
+
+var _music_part := 0
+var _scene := Enemy.new()       # owner of the sprites drawn by the scene routines of the original
+
+
+## Hit tests used by handlers that do their own collision (see HandlerVM): damage of the player's
+## shots / blast inside a box, 0 when there is none.
+func shots_in_box(x0: int, y0: int, x1: int, y1: int) -> int:
+	return _weapons.test_shots_box(x0, y0, x1, y1)
+
+
+func bomb_in_box(x0: int, y0: int, x1: int, y1: int) -> int:
+	return _weapons.test_bomb_box(x0, y0, x1, y1)
+
+
+func blast_in_box(x0: int, y0: int, x1: int, y1: int) -> int:
+	return _weapons.test_blast_box(x0, y0, x1, y1)
+
+
+## Song change asked by an enemy handler (boss music): the original passes the TFMX song number.
+func play_song(song: int) -> void:
+	if _audio != null and song < 0x80:
+		_audio.song(song)
 
 
 func _finish(text: String) -> void:
@@ -301,11 +401,14 @@ func _spawn_wave(col: int) -> void:
 			_spawn_enemy(w, -1)
 
 
-func _spawn_enemy(w: Dictionary, group_slot: int) -> Enemy:
+func _spawn_enemy(w: Dictionary, group_slot: int, use_vm: bool = true) -> Enemy:
 	var e := Enemy.new()
 	e.init_from_wave(w, _level, scroll, group_slot)
-	if e.type == 4 or e.type == 5:
-		e.handler = Handlers.lookup(_level_no, e.handler_addr)
+	if use_vm and (e.type == 4 or e.type == 5):
+		if _vm != null and _vm.ok and _vm.bind(e):
+			e.no_draw = true
+		else:
+			e.handler = Handlers.lookup(_level_no, e.handler_addr)
 	e.spr = Sprite2D.new()
 	e.spr.centered = false
 	e.spr.material = _mat
@@ -368,11 +471,88 @@ func _update_enemies() -> void:
 	for e in _enemies:
 		if e.dead:
 			continue
-		e.tick(self)
-		if e.dead:
-			continue
+		if e.vm_slot >= 0:
+			_run_vm_enemy(e)
+			if e.dead:
+				continue
+		else:
+			e.tick(self)
+			if e.dead:
+				continue
+			e.update_sprite(self, FIELD_Y, X_OFFSET, _tex)
+			e.spr.material = _mat_flash if e.flash > 0 else _mat
+	if _vm != null and _vm.ok:
+		_vm.run_scene(_scene)
+		_show_vm_parts(_scene)
+
+
+## One tick of an enemy whose behaviour is the original handler code.
+func _run_vm_enemy(e: Enemy) -> void:
+	_vm.step(e)
+	if e.dead:
+		return
+	if e.vm_freed:
+		e.dead = true
+		return
+	_show_vm_parts(e)
+	# set pieces (type 5) are drawn from the frame table like the original's dispatcher does
+	if e.type == 5:
+		e.no_draw = false
 		e.update_sprite(self, FIELD_Y, X_OFFSET, _tex)
-		e.spr.material = _mat_flash if e.flash > 0 else _mat
+	else:
+		e.spr.visible = false
+	# death: the byte at +8 ran down to zero (flash bit consumed); a death pattern keeps the handler
+	# running (it may wait for the body to disappear) while the explosions go off
+	if e.dying:
+		e._death_step(self)
+		return
+	if e.hp == 0 and not e.flash_bit:
+		_vm_enemy_died(e)
+
+
+## Sprites a handler (or scene routine) asked for this tick: its draw records and blitter copies.
+func _show_vm_parts(e: Enemy) -> void:
+	var n := 0
+	for d in e.vm_draws:
+		var img := _level.plane_image(d["gfx"], d["mask"], d["w"], d["rows"])
+		draw_part(e, n, img, float(d["x"]), float(d["y"]), (d["flags"] & 0x2000) != 0)
+		n += 1
+	var head := _vm.head()
+	for b in e.vm_blits:
+		var con0: int = b["con0"]
+		var rows: int = b["h"] / _level.planes
+		var w: int = b["w"]
+		if rows < 1 or rows > 200 or w > 12:
+			continue
+		var off: int = (int(b["dst_off"]) - head) & 0xFFFF
+		var bx := float((off % 230) * 8 + (con0 >> 12)) + e.spawn_scroll - scroll + X_OFFSET
+		var by := float(off / 230)
+		var img2: Image = null
+		match con0 & 0xFF:
+			0xF0:                                   # straight copy of source A
+				if b["a"] >= LevelDefs.RAM_BASE and b["a"] < 0x70000:
+					img2 = _level.opaque_image(b["a"], w, rows)
+			0xCA:                                   # cookie cut: A = mask, B = picture, C = background
+				if b["b"] >= LevelDefs.RAM_BASE and b["b"] < 0x70000 and b["a"] >= LevelDefs.RAM_BASE 						and b["a"] < 0x70000 and w >= 2:
+					img2 = _level.interleaved_image(b["b"], b["a"], w - 1, rows)
+		if img2 == null:
+			continue
+		draw_part(e, n, img2, bx, by)
+		n += 1
+	while e.parts.size() > n:
+		var sp: Sprite2D = e.parts.pop_back()
+		sp.queue_free()
+
+
+func _vm_enemy_died(e: Enemy) -> void:
+	_score += e.score
+	_audio.sfx(SFX_EXPLODE)
+	if e.rw(0x16) != 0:
+		e.group = -1
+		e._begin_death_pattern()
+		return
+	e.dead = true
+	e.killed = true
 
 
 ## Removes dead enemies (destroyed or gone) and does the group bookkeeping.
@@ -385,6 +565,8 @@ func _reap_dead() -> void:
 				e.on_death.call(self, e)
 			if e.killed and not e.dying:
 				explode(e.x + 4.0, e.y + 4.0)
+			if e.vm_slot >= 0:
+				_vm.release(e)
 			e.spr.queue_free()
 			for part in e.parts:
 				part.queue_free()
@@ -394,9 +576,34 @@ func _reap_dead() -> void:
 
 
 func _on_enemy_hit(e: Enemy, killed: bool) -> void:
-	if killed:
+	if killed and e.vm_slot < 0:
 		_score += e.score
 		_audio.sfx(SFX_EXPLODE)
+
+
+func add_score_bcd(word: int) -> void:
+	_score += Enemy._bcd(word)
+
+
+## A record a handler wrote into the VM's enemy list becomes a game object.
+func adopt_vm_enemy(vm: HandlerVM, slot: int) -> Enemy:
+	var a: int = vm.slot_addr(slot)
+	var tw := vm.cpu.r16(a)
+	var t := tw & 0x1FF
+	if t != 4 and t != 5:
+		return null
+	var e := Enemy.new()
+	e.level = _level
+	e.type = t
+	e._init_record(_level.rec_const10)
+	e.spr = Sprite2D.new()
+	e.spr.centered = false
+	e.spr.material = _mat
+	_world.add_child(e.spr)
+	e.no_draw = true
+	e.spawn_scroll = scroll
+	_enemies.append(e)
+	return e
 
 
 func _on_weapon_sound(effect: int) -> void:
@@ -501,7 +708,7 @@ func difficulty() -> int:
 
 ## The original's $7B5C: toggles 0 / 1 every tick, so "x -= $7B5C" scrolls half a pixel per tick.
 func scroll_step() -> int:
-	return 0 if scroll_locked else (_tick & 1)
+	return 0 if scroll_locked else (tick & 1)
 
 
 func _vel_scale(v: float) -> float:
@@ -513,34 +720,48 @@ func _vel_scale(v: float) -> float:
 	return v
 
 
-func _add_bullet(x: float, y: float, vx: float, vy: float, big: bool = false) -> void:
+func _add_bullet(x: float, y: float, vx: float, vy: float, big: bool = false) -> Dictionary:
 	var s := Sprite2D.new()
 	s.centered = false
 	s.material = _mat
 	_world.add_child(s)
-	_bullets.append({"x": x, "y": y, "vx": vx, "vy": vy, "big": big, "spr": s})
+	var b := {"x": x, "y": y, "vx": vx, "vy": vy, "big": big, "spr": s}
+	_bullets.append(b)
+	return b
 
 
-## `$535A`: shot aimed at the player, 2 px per tick (practice / easy: not at point blank).
-func fire_aimed(x: float, y: float) -> void:
+## `$535A`: shot aimed at the player, 2 px per tick. `guard`: practice / easy difficulties skip it at
+## point blank (levels 1 and 3); `scale`: the difficulty speeds the shot up or down (levels 1 to 3).
+func fire_aimed(x: float, y: float, guard: bool = true, scale: bool = true) -> void:
 	if y < 0.0:
 		return
-	if difficulty() < 2 and absf(x - px) + absf(y - py) <= 0x5A:
+	if guard and difficulty() < 2 and absf(x - px) + absf(y - py) <= 0x5A:
 		return
 	var dx := float(px + 8) - x
 	var dy := float(py + 10) - y
 	var len := sqrt(dx * dx + dy * dy)
 	if len < 0.5:
 		return
-	_add_bullet(x, y, _vel_scale(dx / len * 2.0), _vel_scale(dy / len * 2.0))
+	var vx := dx / len * 2.0
+	var vy := dy / len * 2.0
+	if scale:
+		vx = _vel_scale(vx)
+		vy = _vel_scale(vy)
+	_add_bullet(x, y, vx, vy)
 	sfx(SFX_ENEMY_FIRE)
 
 
 ## `$53E4`: shot with velocity (d2, d3) given in the original's 16.16 units (0x80000 = 4 px per tick).
-func fire_vel(x: float, y: float, d2: int, d3: int) -> void:
-	if (d2 >> 9) == 0 and (d3 >> 9) == 0:
+func fire_vel(x: float, y: float, d2: int, d3: int, shift: int = 9, scale: bool = true) -> void:
+	if (d2 >> shift) == 0 and (d3 >> shift) == 0:
 		return
-	_add_bullet(x, y, _vel_scale(float(d2) / 131072.0), _vel_scale(float(d3) / 131072.0))
+	var div := float((1 << shift) * 256)
+	var vx := float(d2) / div
+	var vy := float(d3) / div
+	if scale:
+		vx = _vel_scale(vx)
+		vy = _vel_scale(vy)
+	_add_bullet(x, y, vx, vy)
 
 
 const DIR_DX1 := [0, 0, 1, 1, 1, 1, 1, 0, 0, 0, -1, -1, -1, -1, -1, 0]
@@ -550,16 +771,20 @@ const DIR_DY2 := [-2, -2, -2, -1, 0, 1, 2, 2, 2, 2, 2, 1, 0, -1, -2, -2]
 
 
 ## `$531E`: bullet of the given type word (low 5 bits = kind, high byte = direction index * 2).
-func fire_dir(x: float, y: float, word: int) -> void:
+func fire_dir(x: float, y: float, word: int) -> Dictionary:
 	var kind := word & 0x1F
 	var idx := ((word >> 8) & 0x1F) >> 1
 	match kind:
 		1:
-			_add_bullet(x, y, DIR_DX1[idx], DIR_DY1[idx])
+			return _add_bullet(x, y, DIR_DX1[idx], DIR_DY1[idx])
 		3:
-			_add_bullet(x, y, -4.0, -4.0, true)
-		_:
-			_add_bullet(x, y, DIR_DX2[idx], DIR_DY2[idx])
+			return _add_bullet(x, y, -4.0, -4.0, true)
+		5:
+			var b := _add_bullet(x, y, 4.0, 0.0)
+			b["zig"] = (word >> 8) & 1
+			b["ax"] = -float(0x30) / 256.0
+			return b
+	return _add_bullet(x, y, DIR_DX2[idx], DIR_DY2[idx])
 
 
 ## `$441A`: a falling object that follows the level's "ball" script.
@@ -581,7 +806,7 @@ func spawn_heavy(x: float, y: float) -> void:
 		return
 	var w := {"type": 4, "flags": 0, "x": int(x), "y": int(y), "hp": 127, "frame": 0x27, "script": 0,
 		"p6": 0, "p7": 0, "score_bcd": 0, "fire_timer": 255, "fire_reload": 255, "handler": 0, "p11": 0}
-	var e := _spawn_enemy(w, -1)
+	var e := _spawn_enemy(w, -1, false)
 	e.handler = Callable(self, "_heavy_handler")
 	e.vx = _vel_scale(dx / len * 4.0)
 	e.vy = _vel_scale(dy / len * 4.0)
@@ -591,14 +816,14 @@ func spawn_heavy(x: float, y: float) -> void:
 func spawn_native(x: float, y: float, hp: int, frame: int, handler: Callable, hit_w: int, hit_h: int) -> Enemy:
 	var w := {"type": 4, "flags": 0, "x": int(x), "y": int(y), "hp": hp, "frame": frame, "script": 0,
 		"p6": 0, "p7": 0, "score_bcd": 0, "fire_timer": 255, "fire_reload": 255, "handler": 0, "p11": 0}
-	var e := _spawn_enemy(w, -1)
+	var e := _spawn_enemy(w, -1, false)
 	e.handler = handler
 	e.set_hitbox(hit_w, hit_h)
 	return e
 
 
 ## Extra sprite of an enemy (guardian pieces, thrown balls) at raw position (x, y).
-func draw_part(e: Enemy, idx: int, img: Image, x: float, y: float) -> void:
+func draw_part(e: Enemy, idx: int, img: Image, x: float, y: float, flashing: bool = false) -> void:
 	while e.parts.size() <= idx:
 		var s := Sprite2D.new()
 		s.centered = false
@@ -609,7 +834,7 @@ func draw_part(e: Enemy, idx: int, img: Image, x: float, y: float) -> void:
 	sp.texture = _tex(img)
 	sp.position = Vector2(x - X_OFFSET, y + FIELD_Y)
 	sp.visible = true
-	sp.material = _mat_flash if e.flash > 0 else _mat
+	sp.material = _mat_flash if (flashing or e.flash > 0) else _mat
 
 
 func level_plane_image(gfx: int, mask: int, w_words: int, rows: int) -> Image:
@@ -628,7 +853,7 @@ func fire_boomerang(x: float, y: float, dir: int) -> void:
 
 
 func _heavy_handler(_g: Game, e: Enemy) -> void:
-	e.frame = ((_tick >> 2) & 1) + 0x15
+	e.frame = ((tick >> 2) & 1) + 0x15
 	e.x += e.vx
 	e.y += e.vy
 	if e.x < 0.0 or e.y < 0.0 or e.x > 0x15E or e.y > 0xE0:
@@ -669,7 +894,7 @@ func _update_explosions() -> void:
 
 func _update_bullets() -> void:
 	var frames: Array = _level.shot_art["eb"]
-	var frame_img: Image = frames[(_tick >> 2) & 7]
+	var frame_img: Image = frames[(tick >> 2) & 7]
 	var keep: Array[Dictionary] = []
 	for b in _bullets:
 		if b.has("zig"):

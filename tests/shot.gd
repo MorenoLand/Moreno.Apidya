@@ -13,6 +13,9 @@ func _initialize() -> void:
 	var out := "screenshot.png"
 	var wide := false
 	var god := false
+	var bomb := 0
+	var pulse := 0
+	var start_col := -1
 	var ps_arg: PackedStringArray = []
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--level="):
@@ -25,6 +28,12 @@ func _initialize() -> void:
 			wide = true
 		elif a == "--god":
 			god = true
+		elif a.begins_with("--col="):
+			start_col = int(a.substr(6))
+		elif a.begins_with("--bomb="):
+			bomb = int(a.substr(7))
+		elif a.begins_with("--pulse="):
+			pulse = int(a.substr(8))
 		elif a.begins_with("--ps="):
 			ps_arg = a.substr(5).split(",")
 	var g := Game.new()
@@ -40,10 +49,18 @@ func _initialize() -> void:
 		g._ps.w3 = int(ps_arg[3])
 		g._ps.pods = int(ps_arg[4])
 		g._ps.speed = int(ps_arg[5])
+	g._ps.bomb = bomb
+	if start_col >= 0:
+		g.jump_to_col(start_col)
 	Input.action_press("fire")
 	for t in ticks:
 		if god:
 			g._invuln = 100
+		if pulse > 0:
+			if (t / pulse) % 2 == 0:
+				Input.action_press("fire")
+			else:
+				Input.action_release("fire")
 		g._physics_process(0.02)
 	for i in 5:
 		await process_frame
