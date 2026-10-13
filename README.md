@@ -61,6 +61,8 @@ Early but playable prototype.
 | Level 4 hall | the guardian's hall is drawn from the second tile map the level's own routine scrolls |
 | Not yet | exact explosion graphics, story animations, two player team mode, the bonus game |
 
+Notes for someone who wants to port the game elsewhere (MSX): [docs/MSX_PORTING.md](docs/MSX_PORTING.md).
+
 ## How it works
 
 `src/amiga/` decodes the original files:
