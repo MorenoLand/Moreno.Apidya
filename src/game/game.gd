@@ -17,16 +17,16 @@ const PLAYER_X_MIN := 20
 const PLAYER_X_MAX := 300
 const PLAYER_Y_MIN := 3
 const PLAYER_Y_MAX := 212
-const PLAYER_SPEED := 2
-const SHOT_SPEED := 12
-const MAX_PLAYER_SHOTS := 2
+const FIRE_REPEAT := 6          # ticks between volleys while the button is held
+const METER := ["SPD", "BMB", "SHT", "MSL", "WAV", "OPT", "SHD", "SLW"]
 
 # sound effect numbers used by the original (from the call sites of its sound routine)
-const SFX_SHOOT := 6
 const SFX_ENEMY_FIRE := 7
-const SFX_WALL_HIT := 10
 const SFX_EXPLODE := 14
 const SFX_PLAYER_DIE := 30
+const SFX_PICKUP := 0x1D
+const SFX_USE := 0x14
+const SFX_DENIED := 0x1E
 const SONG_LEVEL := 0
 const SONG_LEVEL_END := 6
 
@@ -41,6 +41,7 @@ var _mat_flash: ShaderMaterial
 var _bg: Sprite2D
 var _player_spr: Sprite2D
 var _hud: Label
+var _meter_label: Label
 var _msg: Label
 var _tex_cache := {}
 
@@ -48,9 +49,12 @@ var _scroll := 0.0
 var _col := -1
 var _wave_idx := 0
 var _enemies: Array[Enemy] = []
-var _shots: Array[Dictionary] = []       # player shots {x,y,spr}
 var _bullets: Array[Dictionary] = []     # enemy bullets {x,y,vx,vy,spr}
-var _bullet_tex: ImageTexture
+var _groups: Array = []                  # formation group slots (null or dictionary)
+var _items: Array[Dictionary] = []       # power-up capsules {x,y,spr}
+var _ps := PlayerState.new()
+var _weapons: Weapons
+var _tick := 0
 
 # player state (raw coordinates)
 var px := 40
@@ -62,7 +66,8 @@ var _lives := 3
 var _options := {}
 var _score := 0
 var _invuln := 0
-var _fire_cd := 0
+var _fire_t := 0
+var _fire_was_down := false
 var _dead_t := 0
 var _finished := false
 var _rng := RandomNumberGenerator.new()
@@ -70,6 +75,9 @@ var _audio: AudioManager
 var _arc: AspectRatioContainer
 var _widescreen := false
 var _toast: Label
+var _xtra_latch := false
+var _prev_px := 0
+var _prev_py := 0
 
 
 ## `options` comes from the front end's option screen (see FrontEnd.game_options).
@@ -141,24 +149,20 @@ func _ready() -> void:
 	_player_spr.material = _mat
 	_world.add_child(_player_spr)
 
-	# bullet graphic: small bright block (index of the brightest palette colour)
-	var bright := 19
-	var best := -1.0
-	for i in 32:
-		var lum := _level.palette[i].r + _level.palette[i].g + _level.palette[i].b
-		if lum > best:
-			best = lum
-			bright = i
-	var bimg := Image.create(6, 3, false, Image.FORMAT_LA8)
-	for yy in 3:
-		for xx in 6:
-			bimg.set_pixel(xx, yy, Color(bright / 255.0, bright / 255.0, bright / 255.0, 1.0))
-	_bullet_tex = ImageTexture.create_from_image(bimg)
+	_weapons = Weapons.new()
+	_world.add_child(_weapons)
+	_weapons.setup(_level, _ps, _mat, FIELD_Y)
+	_weapons.sound.connect(_on_weapon_sound)
+	_weapons.enemy_hit.connect(_on_enemy_hit)
 
 	_hud = Label.new()
 	_hud.add_theme_font_size_override("font_size", 8)
 	_hud.position = Vector2(2, -2)
 	_vp.add_child(_hud)
+	_meter_label = Label.new()
+	_meter_label.add_theme_font_size_override("font_size", 8)
+	_meter_label.position = Vector2(150, -2)
+	_vp.add_child(_meter_label)
 	_msg = Label.new()
 	_msg.add_theme_font_size_override("font_size", 10)
 	_msg.position = Vector2(80, 110)
@@ -231,13 +235,20 @@ func _tex(img: Image) -> ImageTexture:
 
 
 func _update_hud() -> void:
-	_hud.text = "L%d %s   SCORE %06d   LIVES %d" % [_level_no, _level.name.to_upper(), _score, _lives]
+	_hud.text = "L%d  %06d  x%d" % [_level_no, _score, _lives]
+	var t := ""
+	for i in METER.size():
+		t += ("[%s]" if _ps.bar == i + 1 else " %s ") % METER[i]
+	_meter_label.text = t
 
 
 # ------------------------------------------------------------------------------------------------
 func _physics_process(_delta: float) -> void:
 	if _finished:
 		return
+	_tick += 1
+	Enemy.phase_a = [0, 1, 2, 1][_tick & 3]
+	Enemy.phase_b = [1, 2, 1, 0][_tick & 3]
 	_scroll += SCROLL_STEP
 	var new_col := int(_scroll) / 16
 	var max_scroll := float(_level.cols * 16 - VIEW_W)
@@ -249,9 +260,14 @@ func _physics_process(_delta: float) -> void:
 		_col += 1
 		_spawn_wave(_col)
 
+	_tick_groups()
 	_update_player()
 	_update_enemies()
-	_update_shots()
+	_weapons.tick(px, py, _scroll, _enemies, px != _prev_px or py != _prev_py)
+	_prev_px = px
+	_prev_py = py
+	_reap_dead()
+	_update_items()
 	_update_bullets()
 	_collide()
 	_update_hud()
@@ -266,6 +282,7 @@ func _finish(text: String) -> void:
 	_msg.text = text + "\n\nPress ESC"
 
 
+# ---- enemies and formations --------------------------------------------------------------------
 func _spawn_wave(col: int) -> void:
 	var waves := _level.waves
 	while _wave_idx < waves.size() and waves[_wave_idx]["col"] == 0:
@@ -273,17 +290,135 @@ func _spawn_wave(col: int) -> void:
 	while _wave_idx < waves.size() and waves[_wave_idx]["col"] == col:
 		var w: Dictionary = waves[_wave_idx]
 		_wave_idx += 1
-		if w["decor"]:
+		if w["group"]:
+			_start_group(w)
+		else:
+			_spawn_enemy(w, -1)
+
+
+func _spawn_enemy(w: Dictionary, group_slot: int) -> void:
+	var e := Enemy.new()
+	e.init_from_wave(w, _level, _scroll, group_slot)
+	e.spr = Sprite2D.new()
+	e.spr.centered = false
+	e.spr.material = _mat
+	_world.add_child(e.spr)
+	_enemies.append(e)
+
+
+func _start_group(w: Dictionary) -> void:
+	var g := {"entries": _level.decode_formation(w["list"]), "i": 0, "timer": 0, "alive": 0,
+		"killed": 0, "required": w["required"], "hold": w["hold"]}
+	for i in _groups.size():
+		if _groups[i] == null:
+			_groups[i] = g
+			return
+	_groups.append(g)
+
+
+## The original's group routine ($3B60): every tick the group timer advances and the entry whose
+## delay it reaches is spawned; a group whose list ended is freed once all of its enemies are gone.
+func _tick_groups() -> void:
+	for idx in _groups.size():
+		var g: Variant = _groups[idx]
+		if g == null or g["hold"] != 0:
 			continue
-		var e := Enemy.new()
-		e.init_from_wave(w, _level, _scroll)
-		e.spr = Sprite2D.new()
-		e.spr.centered = false
-		e.spr.material = _mat
-		_world.add_child(e.spr)
-		_enemies.append(e)
+		var entries: Array = g["entries"]
+		if g["i"] >= entries.size():
+			if g["alive"] <= 0:
+				_groups[idx] = null
+			continue
+		g["timer"] += 1
+		if g["timer"] >= entries[g["i"]]["delay"]:
+			_spawn_enemy(entries[g["i"]], idx)
+			g["alive"] += 1
+			g["i"] += 1
 
 
+func _enemy_gone(e: Enemy, killed: bool) -> void:
+	if e.group < 0 or e.group >= _groups.size() or _groups[e.group] == null:
+		return
+	var g: Dictionary = _groups[e.group]
+	g["alive"] -= 1
+	if killed:
+		g["killed"] += 1
+		if g["required"] > 0 and g["killed"] == g["required"]:
+			g["killed"] = 0
+			_drop_item(e.x, e.y)
+
+
+func _drop_item(x: float, y: float) -> void:
+	var spr := Sprite2D.new()
+	spr.centered = false
+	spr.material = _mat
+	spr.texture = _tex(_level.item_img)
+	_world.add_child(spr)
+	_items.append({"x": x, "y": y, "spr": spr})
+
+
+func _update_enemies() -> void:
+	for e in _enemies:
+		if e.dead:
+			continue
+		e.tick(_level, px, py, _scroll, _rng)
+		if e.dead:
+			continue
+		e.update_sprite(_level, FIELD_Y, X_OFFSET, _tex)
+		e.spr.material = _mat_flash if e.flash > 0 else _mat
+		if e.want_fire(_rng):
+			_enemy_fire(e)
+
+
+## Removes dead enemies (destroyed or gone) and does the group bookkeeping.
+func _reap_dead() -> void:
+	var keep: Array[Enemy] = []
+	for e in _enemies:
+		if e.dead:
+			_enemy_gone(e, e.killed)
+			e.spr.queue_free()
+		else:
+			keep.append(e)
+	_enemies = keep
+
+
+func _on_enemy_hit(e: Enemy, killed: bool) -> void:
+	if killed:
+		_score += e.score
+		_audio.sfx(SFX_EXPLODE)
+
+
+func _on_weapon_sound(effect: int) -> void:
+	_audio.sfx(effect)
+
+
+# ---- items / meter ----------------------------------------------------------------------------
+func _update_items() -> void:
+	var keep: Array[Dictionary] = []
+	for it in _items:
+		it["x"] -= SCROLL_STEP
+		if it["x"] < -20.0:
+			it["spr"].queue_free()
+			continue
+		# pick up: the capsule's position inside [px-8, px+32] x [py-6, py+24]
+		if _dead_t == 0 and it["x"] >= px - 8 and it["x"] <= px + 32 and it["y"] >= py - 6 and it["y"] <= py + 24:
+			_ps.pickup()
+			_audio.sfx(SFX_PICKUP)
+			it["spr"].queue_free()
+			continue
+		it["spr"].position = Vector2(it["x"] - X_OFFSET, it["y"] + FIELD_Y)
+		keep.append(it)
+	_items = keep
+
+
+func _use_meter() -> void:
+	match _ps.activate():
+		PlayerState.Result.USED:
+			_audio.sfx(SFX_USE)
+		PlayerState.Result.DENIED:
+			_audio.sfx(SFX_DENIED)
+
+
+# ---- player -------------------------------------------------------------------------------------
 func _update_player() -> void:
 	if _dead_t > 0:
 		_dead_t -= 1
@@ -298,8 +433,8 @@ func _update_player() -> void:
 		return
 	var dx := int(Input.is_action_pressed("move_right")) - int(Input.is_action_pressed("move_left"))
 	var dy := int(Input.is_action_pressed("move_down")) - int(Input.is_action_pressed("move_up"))
-	px = clampi(px + dx * PLAYER_SPEED, PLAYER_X_MIN, PLAYER_X_MAX)
-	py = clampi(py + dy * PLAYER_SPEED, PLAYER_Y_MIN, PLAYER_Y_MAX)
+	px = clampi(px + dx * _ps.speed, PLAYER_X_MIN, PLAYER_X_MAX)
+	py = clampi(py + dy * _ps.speed, PLAYER_Y_MIN, PLAYER_Y_MAX)
 	_vdir = 0
 	if dy < 0:
 		_vdir = 1       # up   -> variant 2
@@ -320,36 +455,29 @@ func _update_player() -> void:
 	if _invuln > 0:
 		_invuln -= 1
 		_player_spr.visible = (_invuln / 3) % 2 == 0
-	# firing
-	if _fire_cd > 0:
-		_fire_cd -= 1
-	if Input.is_action_pressed("fire") and _shots.size() <= MAX_PLAYER_SHOTS - 2 and _fire_cd == 0:
-		_fire_cd = 6
-		for oy in [10, 22]:
-			var s := Sprite2D.new()
-			s.centered = false
-			s.material = _mat
-			s.texture = _bullet_tex
-			_world.add_child(s)
-			_shots.append({"x": px + 8, "y": py + oy, "spr": s})
-		_audio.sfx(SFX_SHOOT)
+
+	# firing: tap or hold (repeats), holding also charges the blast that is let go on release
+	var held := Input.is_action_pressed("fire")
+	if held:
+		_fire_t -= 1
+		if not _fire_was_down or _fire_t <= 0:
+			if _weapons.fire(px, py):
+				_fire_t = FIRE_REPEAT
+			else:
+				_fire_t = 2
+	_weapons.hold_fire(held, px, py)
+	_fire_was_down = held
+
+	# power-up meter: second button, or by itself in "auto" mode
+	var xtra := Input.is_action_pressed("xtra")
+	if xtra and not _xtra_latch:
+		_use_meter()
+	_xtra_latch = xtra
+	if int(_options.get("xtra", 0)) == 0 and _ps.auto_wants():
+		_use_meter()
 
 
-func _update_enemies() -> void:
-	var keep: Array[Enemy] = []
-	for e in _enemies:
-		e.tick(_level, px, py, _scroll, _rng)
-		if e.dead:
-			e.spr.queue_free()
-			continue
-		e.update_sprite(_level, FIELD_Y, X_OFFSET, _tex)
-		e.spr.material = _mat_flash if e.flash > 0 else _mat
-		if e.want_fire(_rng):
-			_enemy_fire(e)
-		keep.append(e)
-	_enemies = keep
-
-
+# ---- enemy bullets ---------------------------------------------------------------------------------
 func _enemy_fire(e: Enemy) -> void:
 	var sx := e.x + 4.0
 	var sy := e.y + 4.0
@@ -359,25 +487,14 @@ func _enemy_fire(e: Enemy) -> void:
 	var s := Sprite2D.new()
 	s.centered = false
 	s.material = _mat
-	s.texture = _bullet_tex
 	_world.add_child(s)
 	_bullets.append({"x": sx, "y": sy, "vx": dxp / len * 2.0, "vy": dyp / len * 2.0, "spr": s})
 	_audio.sfx(SFX_ENEMY_FIRE)
 
 
-func _update_shots() -> void:
-	var keep: Array[Dictionary] = []
-	for s in _shots:
-		s["x"] += SHOT_SPEED
-		if s["x"] > 330:
-			s["spr"].queue_free()
-			continue
-		s["spr"].position = Vector2(s["x"] - X_OFFSET, s["y"] + FIELD_Y)
-		keep.append(s)
-	_shots = keep
-
-
 func _update_bullets() -> void:
+	var frames: Array = _level.shot_art["eb"]
+	var frame_img: Image = frames[(_tick >> 2) & 7]
 	var keep: Array[Dictionary] = []
 	for b in _bullets:
 		b["x"] += b["vx"]
@@ -385,33 +502,13 @@ func _update_bullets() -> void:
 		if b["x"] < -10 or b["x"] > 340 or b["y"] < -10 or b["y"] > 250:
 			b["spr"].queue_free()
 			continue
+		b["spr"].texture = _tex(frame_img)
 		b["spr"].position = Vector2(b["x"] - X_OFFSET, b["y"] + FIELD_Y)
 		keep.append(b)
 	_bullets = keep
 
 
 func _collide() -> void:
-	# player shots vs enemies (raw coordinates, as in the original)
-	var live_shots: Array[Dictionary] = []
-	for s in _shots:
-		var hit := false
-		for e in _enemies:
-			if e.hp <= 0 or e.dead:
-				continue
-			if s["x"] + 6 >= e.x and s["x"] <= e.x + e.hit_w and s["y"] + 3 >= e.y and s["y"] <= e.y + e.hit_h:
-				e.hit(1)
-				hit = true
-				if e.hp <= 0:
-					_score += e.score
-					_audio.sfx(SFX_EXPLODE)
-				else:
-					_audio.sfx(SFX_WALL_HIT)
-				break
-		if hit:
-			s["spr"].queue_free()
-		else:
-			live_shots.append(s)
-	_shots = live_shots
 	if _dead_t > 0 or _invuln > 0:
 		return
 	# enemies / bullets vs player: rect [px-8, px+16] x [py-4, py+6]
@@ -434,8 +531,15 @@ func _collide() -> void:
 
 
 func _player_hit() -> void:
+	if _ps.shield and _ps.shield_hits > 0:
+		_ps.shield_hits -= 1
+		if _ps.shield_hits <= 0:
+			_ps.shield = false
+		_invuln = 40
+		return
 	_audio.sfx(SFX_PLAYER_DIE)
 	_lives -= 1
 	_dead_t = 60
 	_player_spr.visible = false
+	_ps.reset_for_life()
 	_update_hud()

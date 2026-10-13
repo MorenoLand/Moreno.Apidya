@@ -12,6 +12,8 @@ func _initialize() -> void:
 	var ticks := 600
 	var out := "screenshot.png"
 	var wide := false
+	var god := false
+	var ps_arg: PackedStringArray = []
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--level="):
 			level = int(a.substr(8))
@@ -21,15 +23,27 @@ func _initialize() -> void:
 			out = a.substr(6)
 		elif a == "--wide":
 			wide = true
+		elif a == "--god":
+			god = true
+		elif a.begins_with("--ps="):
+			ps_arg = a.substr(5).split(",")
 	var g := Game.new()
 	g.setup(found["disks"], level)
 	root.add_child(g)
 	await process_frame
 	await process_frame
 	g._set_widescreen(wide, false)
-	Input.action_press("move_right")
+	if ps_arg.size() >= 6:
+		g._ps.weapon = int(ps_arg[0])
+		g._ps.w1 = int(ps_arg[1])
+		g._ps.w2 = int(ps_arg[2])
+		g._ps.w3 = int(ps_arg[3])
+		g._ps.pods = int(ps_arg[4])
+		g._ps.speed = int(ps_arg[5])
 	Input.action_press("fire")
 	for t in ticks:
+		if god:
+			g._invuln = 100
 		g._physics_process(0.02)
 	for i in 5:
 		await process_frame

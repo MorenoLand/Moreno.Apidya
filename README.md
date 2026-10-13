@@ -32,7 +32,8 @@ No path is hard-coded anywhere.
 | | |
 |---|---|
 | Arrow keys | Move / change options |
-| Space / Enter / Ctrl | Fire / confirm |
+| Space / Enter / Ctrl | Fire (hold = repeat; hold ~1 s and release = charge blast) / confirm |
+| X / Shift | Use the highlighted power-up (not needed in "auto" mode) |
 | Esc | Back (game -> front end, front end -> title, title -> quit) |
 | F2 | Switch between the original 4:3 picture and stretched widescreen (remembered) |
 | F11 | Fullscreen |
@@ -46,9 +47,10 @@ Early but playable prototype.
 |---|---|
 | Front end | title, story pages, options (level, lives, team mode, extra select, 1up, control, sound test), high scores and name entry, with the original pictures, palettes, font, texts and menu music |
 | Levels 1-4 | backgrounds (tiles, maps, per-scanline Copper gradients), scrolling, player, enemy waves and movement |
-| Enemies | path followers, scroll-locked objects, polar movers; shooting, hit points, score |
+| Enemies | path followers, scroll-locked objects, polar movers, timed formations; shooting, hit points, score |
+| Power-ups | capsules drop when a formation is wiped out; the 8-slot meter (speed, bomb, spread / missile / wave weapons with their levels, option pods, shield, slow down) with the original's auto-use rules; all weapon shot types and the charge blast |
 | Audio | all music and sound effects, rendered by the game's own replay routine (see below) |
-| Not yet | level 5, bosses/guardians (native handler enemies), power-ups and weapon upgrades, HUD graphics, story animations, ending |
+| Not yet | level 5, bosses/guardians (native handler enemies), explosions, HUD graphics, original enemy bullet patterns, story animations, ending |
 
 ## How it works
 

@@ -13,7 +13,14 @@ var frame := 0
 var hit_w := 16
 var hit_h := 16
 var dead := false
+var killed := false          # destroyed by the player (as opposed to leaving the screen)
 var flash := 0
+var invulnerable := false
+var group := -1              # formation group slot this enemy counts for
+var flags := 0               # type word >> 9: 8 = animation phase B, 0x10 = hidden, 0x20 = large frame list
+
+static var phase_a := 0      # shared animation phases (the original's $7CAC / $7CAD)
+static var phase_b := 0
 
 # type 2/3 path state
 var _script: Array = []
@@ -35,8 +42,10 @@ var _fire_t := 0
 var _world_x := 0.0          # type 1: world x (screen x + scroll)
 
 
-func init_from_wave(w: Dictionary, level: LevelData, scroll: float) -> void:
+func init_from_wave(w: Dictionary, level: LevelData, scroll: float, group_slot: int = -1) -> void:
 	type = w["type"]
+	flags = w.get("flags", 0)
+	group = group_slot
 	x = float(w["x"])
 	y = float(w["y"])
 	hp = maxi(1, w["hp"])
@@ -75,7 +84,11 @@ func _frame_record(level: LevelData, px: int) -> Dictionary:
 		else:
 			idx = base + 2
 	else:
-		idx = frame + 6
+		var base := 51 if (flags & 0x20) else 6
+		var phase := 0
+		if type == 3 or type >= 7:
+			phase = phase_b if (flags & 8) else phase_a
+		idx = frame + base + phase
 	if idx < 0 or idx >= level.bob_frames.size():
 		return {}
 	return level.bob_frames[idx]
@@ -99,11 +112,16 @@ func _next_entry() -> void:
 	_timer = 0
 
 
-func hit(dmg: int) -> void:
+## Applies damage; returns true when this destroyed the enemy.
+func hit(dmg: int) -> bool:
 	hp -= dmg
 	flash = 4
 	if hp <= 0:
+		hp = 0
 		dead = true
+		killed = true
+		return true
+	return false
 
 
 func want_fire(rng: RandomNumberGenerator) -> bool:
@@ -194,7 +212,7 @@ func _tick_polar(level: LevelData) -> void:
 
 func update_sprite(level: LevelData, field_y: int, x_off: int, tex_fn: Callable) -> void:
 	var f := _frame_record(level, int(x) - 16)
-	if f.is_empty() or not f.has("img"):
+	if (flags & 0x10) or f.is_empty() or not f.has("img"):
 		spr.visible = false
 		return
 	spr.visible = true
