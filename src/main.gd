@@ -15,6 +15,7 @@ var _level_no := 1
 
 
 func _ready() -> void:
+	_setup_gamepad()
 	var bg := ColorRect.new()
 	bg.color = Color(0.05, 0.05, 0.08)
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -57,6 +58,67 @@ func _ready() -> void:
 		_open_front_end()
 	else:
 		_show_need_files(res["error"])
+
+
+# ---- gamepad: the stick and pad drive the game's actions; menus (which read keys) get the matching keys -----
+const PAD_KEYS := {
+	JOY_BUTTON_DPAD_UP: KEY_UP, JOY_BUTTON_DPAD_DOWN: KEY_DOWN, JOY_BUTTON_DPAD_LEFT: KEY_LEFT,
+	JOY_BUTTON_DPAD_RIGHT: KEY_RIGHT, JOY_BUTTON_A: KEY_ENTER, JOY_BUTTON_START: KEY_ESCAPE,
+	JOY_BUTTON_BACK: KEY_ESCAPE,
+}
+var _stick := [0, 0]            # -1 / 0 / 1 of the left stick, to send a key only when it changes
+
+
+func _setup_gamepad() -> void:
+	var button := func(action: String, b: int) -> void:
+		var e := InputEventJoypadButton.new()
+		e.button_index = b
+		InputMap.action_add_event(action, e)
+	var axis := func(action: String, ax: int, v: float) -> void:
+		var e := InputEventJoypadMotion.new()
+		e.axis = ax
+		e.axis_value = v
+		InputMap.action_add_event(action, e)
+	button.call("move_left", JOY_BUTTON_DPAD_LEFT)
+	button.call("move_right", JOY_BUTTON_DPAD_RIGHT)
+	button.call("move_up", JOY_BUTTON_DPAD_UP)
+	button.call("move_down", JOY_BUTTON_DPAD_DOWN)
+	axis.call("move_left", JOY_AXIS_LEFT_X, -1.0)
+	axis.call("move_right", JOY_AXIS_LEFT_X, 1.0)
+	axis.call("move_up", JOY_AXIS_LEFT_Y, -1.0)
+	axis.call("move_down", JOY_AXIS_LEFT_Y, 1.0)
+	button.call("fire", JOY_BUTTON_A)
+	button.call("fire", JOY_BUTTON_X)
+	button.call("xtra", JOY_BUTTON_B)
+	button.call("xtra", JOY_BUTTON_Y)
+
+
+func _send_key(code: int, pressed: bool) -> void:
+	var k := InputEventKey.new()
+	k.keycode = code as Key
+	k.physical_keycode = code as Key
+	k.pressed = pressed
+	Input.parse_input_event(k)
+
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventJoypadButton and PAD_KEYS.has(event.button_index):
+		_send_key(int(PAD_KEYS[event.button_index]), event.pressed)
+	elif event is InputEventJoypadMotion and (event.axis == JOY_AXIS_LEFT_X or event.axis == JOY_AXIS_LEFT_Y):
+		var i := 0 if event.axis == JOY_AXIS_LEFT_X else 1
+		var v := 0
+		if event.axis_value < -0.6:
+			v = -1
+		elif event.axis_value > 0.6:
+			v = 1
+		if v != _stick[i]:
+			var lo := KEY_LEFT if i == 0 else KEY_UP
+			var hi := KEY_RIGHT if i == 0 else KEY_DOWN
+			if _stick[i] != 0:
+				_send_key(lo if _stick[i] < 0 else hi, false)
+			if v != 0:
+				_send_key(lo if v < 0 else hi, true)
+			_stick[i] = v
 
 
 func _show_need_files(error: String) -> void:
