@@ -1,4 +1,4 @@
-class_name LevelDefs
+﻿class_name LevelDefs
 extends RefCounted
 ## Where everything lives inside each level's (unpacked) code/data file. All addresses are Amiga RAM
 ## addresses; the unpacked file is loaded at RAM_BASE ($0A00). Found by reverse engineering, see the notes.
@@ -23,5 +23,12 @@ const LEVELS := {
 		"waves": 0x7BD0, "copper": 0x7FA8, "angle": 0x8204},
 }
 
-## Music modules on disk: file index per module (levels use modules in this order)
-const MUSIC_FILES := [6, 7, 8, 9, 10]
+## TFMX music per level: disk file of the module, and the two addresses the level code passes to the
+## player's init routine (module start, sample base). Each level starts song 0.
+const MUSIC := {
+	1: {"file": 6, "mdat": 0x32000, "smpl": 0x33FD4},
+	2: {"file": 7, "mdat": 0x2E000, "smpl": 0x308B0},
+	3: {"file": 8, "mdat": 0x2E000, "smpl": 0x2FE94},
+	4: {"file": 9, "mdat": 0x35000, "smpl": 0x375F0},
+	5: {"file": 10, "mdat": 0x38000, "smpl": 0x39348},
+}

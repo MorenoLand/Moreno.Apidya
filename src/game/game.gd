@@ -21,6 +21,15 @@ const PLAYER_SPEED := 2
 const SHOT_SPEED := 12
 const MAX_PLAYER_SHOTS := 2
 
+# sound effect numbers used by the original (from the call sites of its sound routine)
+const SFX_SHOOT := 6
+const SFX_ENEMY_FIRE := 7
+const SFX_WALL_HIT := 10
+const SFX_EXPLODE := 14
+const SFX_PLAYER_DIE := 30
+const SONG_LEVEL := 0
+const SONG_LEVEL_END := 6
+
 var _disks: DiskSet
 var _level_no := 1
 var _level: LevelData
@@ -55,6 +64,7 @@ var _fire_cd := 0
 var _dead_t := 0
 var _finished := false
 var _rng := RandomNumberGenerator.new()
+var _audio: AudioManager
 
 
 func setup(disks: DiskSet, level_no: int) -> void:
@@ -136,6 +146,16 @@ func _ready() -> void:
 	_vp.add_child(_msg)
 	_update_hud()
 
+	_audio = AudioManager.new()
+	add_child(_audio)
+	if _audio.start(_disks, _level_no):
+		_audio.song(SONG_LEVEL)
+
+
+func _exit_tree() -> void:
+	if _audio != null:
+		_audio.stop()
+
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
@@ -178,6 +198,10 @@ func _physics_process(_delta: float) -> void:
 
 func _finish(text: String) -> void:
 	_finished = true
+	if _audio != null and text == "LEVEL COMPLETE":
+		_audio.song(SONG_LEVEL_END)
+	elif _audio != null:
+		_audio.fade(0x30000)
 	_msg.text = text + "\n\nPress ESC"
 
 
@@ -247,6 +271,7 @@ func _update_player() -> void:
 			s.texture = _bullet_tex
 			_world.add_child(s)
 			_shots.append({"x": px + 8, "y": py + oy, "spr": s})
+		_audio.sfx(SFX_SHOOT)
 
 
 func _update_enemies() -> void:
@@ -275,6 +300,7 @@ func _enemy_fire(e: Enemy) -> void:
 	s.texture = _bullet_tex
 	_world.add_child(s)
 	_bullets.append({"x": sx, "y": sy, "vx": dxp / len * 2.0, "vy": dyp / len * 2.0, "spr": s})
+	_audio.sfx(SFX_ENEMY_FIRE)
 
 
 func _update_shots() -> void:
@@ -315,6 +341,9 @@ func _collide() -> void:
 				hit = true
 				if e.hp <= 0:
 					_score += e.score
+					_audio.sfx(SFX_EXPLODE)
+				else:
+					_audio.sfx(SFX_WALL_HIT)
 				break
 		if hit:
 			s["spr"].queue_free()
@@ -343,6 +372,7 @@ func _collide() -> void:
 
 
 func _player_hit() -> void:
+	_audio.sfx(SFX_PLAYER_DIE)
 	_lives -= 1
 	_dead_t = 60
 	_player_spr.visible = false

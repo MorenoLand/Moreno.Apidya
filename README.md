@@ -43,7 +43,8 @@ Early but playable prototype.
 |---|---|
 | Levels 1-4 | backgrounds (tiles, maps, per-scanline Copper gradients), scrolling, player, enemy waves and movement |
 | Enemies | path followers, scroll-locked objects, polar movers; shooting, hit points, score |
-| Not yet | level 5, bosses/guardians (native handler enemies), power-ups and weapon upgrades, music and sound effects, HUD graphics, title/story screens |
+| Audio | all music and sound effects, rendered by the game's own replay routine (see below) |
+| Not yet | level 5, bosses/guardians (native handler enemies), power-ups and weapon upgrades, HUD graphics, title/story screens |
 
 ## How it works
 
@@ -54,6 +55,11 @@ Early but playable prototype.
 - `LevelData` turns a level file into tiles, map, palette, enemy/player frames and wave tables.
 - `Copper` runs the Copper list to get the palette in effect on every scanline.
 
+`src/audio/` plays the music and effects the way the original did: the game's TFMX replay routine
+(it lives on disk 1) is executed by a small 68000 interpreter (`M68K`), which feeds a model of the
+Amiga's four-channel DMA audio (`Paula`). `AudioManager` runs that on a worker thread and streams the
+result, so songs and effects come straight from the original data with no pre-rendered audio.
+
 `src/game/` is the new engine: a fixed 50 Hz loop that scrolls the map half a pixel per tick, spawns
 enemies from the wave table when their column scrolls in and moves them with the original path/polar
 scripts. Everything is drawn from colour-index textures through a per-scanline palette shader.
@@ -62,6 +68,7 @@ scripts. Everything is drawn from colour-index textures through a per-scanline p
 
 ```
 src/amiga/      readers for the original disk format and level data
+src/audio/      68000 interpreter, Paula model, TFMX player, audio manager
 src/game/       the game itself (level scene, enemies)
 shaders/        indexed-colour + per-scanline palette shader
 scenes/         start scene
@@ -76,6 +83,8 @@ With the game files available:
 ```
 redot --headless --path . --script res://tests/test_data.gd -- --disks=<folder>
 redot --headless --path . --script res://tests/test_sim.gd  -- --disks=<folder> --level=1
+redot --headless --path . --script res://tests/test_audio.gd -- --disks=<folder> --level=1 --seconds=10
+redot --headless --path . --script res://tests/test_audio_all.gd -- --disks=<folder>   # every song/effect
 ```
 
 ## Legal
